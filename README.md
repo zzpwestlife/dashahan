@@ -46,6 +46,33 @@ npm run build              # 产出 src-tauri/target/release/bundle/dmg/
 - `设置 API Key`: 弹出 macOS 原生对话框输入 DeepSeek API Key (写入 app config, 注入 `DEEPSEEK_API_KEY`). 首次启动无 key 时同样弹原生对话框.
 - `打开日志目录`: 定位 `logs/dsh.log` 与 `logs/npm.log`.
 
+## 升级 dsh (上游更新) / Updating dsh
+
+当 `@deepseek-ai/dsh` 发布新版本时的同步流程:
+
+1. **检查**: `./scripts/check-dsh-update.sh` (比对 main.rs 锁定版本与 npm 最新版).
+2. **升级**: 修改 `src-tauri/src/main.rs` 的 `DSH_VERSION` 为新版本.
+3. **验证 (标准回归)** — 重建后本机启动, 依次检查:
+   - [ ] dsh web 正常启动 (boot.log 无错误, 端口绑定成功)
+   - [ ] 页面可打开 (curl 本地端口返回 HTTP 200)
+   - [ ] 发一条真实消息, 确认模型能回复 (页面能开 ≠ 能对话)
+   - [ ] `dsh --profile web --dump-config` 对比 profile 结构是否有大变化
+   - [ ] **旧 dsh-home 不删直接跑**是否兼容 (老用户带对话记录升级的路径)
+4. **发布**: DASH 版本号 +1 (v0.1.1, v0.1.2...), 新建 GitHub Release tag + 挂新 zip, notes 注明"内含 dsh x.y.z"; 旧版本保留可回退.
+
+### 壳与 dsh 的耦合点 (升级时重点检查)
+
+| 耦合点 | 位置 | dsh 变更后可能的表现 |
+|---|---|---|
+| 启动参数 `dsh web --host --port` | `src-tauri/src/server.rs` | web 起不来/页面空白 |
+| 安装命令 `npm install --prefix ... @deepseek-ai/dsh@<ver>` | `src-tauri/src/bootstrap.rs` | 装不上 |
+| 环境变量 `DEEPSEEK_API_KEY` / `DSH_HOME` | `src-tauri/src/server.rs` | key 不生效/数据错位 |
+| dsh-home profile 结构 | `~/Library/Application Support/com.solo.dashahan/dsh-home` | 老用户升级后崩溃 |
+
+### 已知限制
+
+- 菜单「更新 dsh」安装的是**当前二进制锁定的版本** —— 升级依赖重新发布 app, 老用户需下载新版 (不会自动升级).
+
 ## 数据位置 / Data
 
 | 内容 | 路径 |
