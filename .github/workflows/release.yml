@@ -29,7 +29,8 @@ jobs:
           npm install --registry=https://registry.npmjs.org/
 
       - name: 构建轻量版 (arm64, 系统 Node)
-        run: npm run build -- --target aarch64-apple-darwin
+        # --bundles app,dmg: tauri 默认只出 dmg 且打包后清理 .app, 必须显式保留 app 供后续分发
+        run: npm run build -- --target aarch64-apple-darwin --bundles app,dmg
         env:
           DASH_LITE: "1"
 
@@ -42,7 +43,7 @@ jobs:
       - name: 下载内嵌 Node + 构建完整版 (arm64, 内嵌 Node)
         run: |
           ./scripts/fetch-node-dist.sh
-          npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin
+          npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin --bundles app,dmg
 
       - name: 安装完整版 app 并跑冒烟测试 (发版门禁)
         run: |
