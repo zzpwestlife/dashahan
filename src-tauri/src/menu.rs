@@ -15,6 +15,10 @@ const ID_APIKEY: &str = "set-api-key";
 const ID_NOTIFY: &str = "notify-toggle";
 const ID_LOGS: &str = "open-logs";
 const ID_RESET: &str = "reset-conversations";
+/// 退出: 自定义菜单项 (不走 PredefinedMenuItem::quit 的 macOS terminate 流程,
+/// 因为该流程下 prevent_exit 在 macOS 上不可靠 —— 应用会在 Rust 事件循环拦截前就终止。
+/// 改为点击即弹确认框, 确认后才真正 exit(0)。
+pub const ID_QUIT: &str = "quit-app";
 
 pub fn install(app: &App) -> tauri::Result<()> {
     // 日常项
@@ -30,7 +34,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
     )?;
     let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, ID_RESET, "清空对话历史", true, None::<&str>)?;
-    let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;
+    // ⌘Q 绑定到本自定义项: macOS 下 tao/muda 用 set_menu 后不再有默认 Quit 项,
+    // 故 ⌘Q 唯一命中本项 -> request_quit -> 确认框 (而非走系统 terminate, 无法拦截).
+    let quit = MenuItem::with_id(app, ID_QUIT, "退出 大傻憨", true, Some("Cmd+Q"))?;
     // 「检查更新」子菜单: 两条更新线 + 重装 dsh (收起, 避免主菜单拥挤)
     let dsh_update = MenuItem::with_id(app, ID_DSH_UPDATE, "检查 dsh 更新", true, None::<&str>)?;
     let dash_update = MenuItem::with_id(app, ID_DASH_UPDATE, "检查 DASH 更新", true, None::<&str>)?;
@@ -88,6 +94,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         ID_NOTIFY => toggle_notify(app.clone()),
         ID_LOGS => open_logs(app),
         ID_RESET => reset_conversations(app.clone()),
+        ID_QUIT => request_quit(app.clone()),
         _ => {}
     });
     Ok(())
@@ -248,5 +255,17 @@ fn reset_conversations(app: AppHandle) {
         // 重启 dsh: 重建干净会话目录并刷新窗口
         bootstrap::start(app);
         shared::notify("对话历史已清空", "dsh 已重启，损坏记录已移除。");
+    });
+}
+
+/// 退出二次确认: 自定义菜单项触发 (不走 PredefinedMenuItem::quit 的 macOS terminate 流程,
+/// 因为该流程下 prevent_exit 在 macOS 上不可靠 —— 应用会在 Rust 事件循环拦截前就终止)。
+/// 点击/⌘Q 均命中本函数: 弹确认框, 确认后才真正 exit(0)。
+/// (Dock 右键 Quit 仍走系统 terminate, 需 objc2 applicationShouldTerminate 才能拦截, 暂未做。)
+pub fn request_quit(app: AppHandle) {
+    std::thread::spawn(move || {
+        if shared::confirm("确认退出 DASH？\n退出后本地 dsh 服务会停止，后台对话将关闭。") {
+            app.exit(0);
+        }
     });
 }

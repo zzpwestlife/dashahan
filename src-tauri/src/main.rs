@@ -11,7 +11,7 @@ mod shared;
 mod state;
 mod update;
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, RunEvent};
 
@@ -71,29 +71,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("大傻憨 build failed")
         .run(|app, event| match event {
-            // 退出二次确认: 菜单/Cmd+Q/Dock 退出都走这里. 首次拦截并弹确认,
-            // 确认后置 quit_confirmed, 重新 exit 时放行并终止 dsh.
-            RunEvent::ExitRequested { api, .. } => {
-                let st = app.state::<state::AppState>();
-                if st.quit_confirmed.load(std::sync::atomic::Ordering::SeqCst) {
-                    st.kill_child();
-                } else {
-                    api.prevent_exit();
-                    let apph = app.clone();
-                    std::thread::spawn(move || {
-                        if shared::confirm(
-                            "确认退出 DASH？\n退出后本地 dsh 服务会停止，后台对话将关闭。",
-                        ) {
-                            apph
-                                .state::<state::AppState>()
-                                .quit_confirmed
-                                .store(true, std::sync::atomic::Ordering::SeqCst);
-                            apph.exit(0);
-                        }
-                    });
-                }
-            }
-            RunEvent::Exit => {
+            // 退出清理: 杀掉 dsh 子进程. 用户主动退出 (菜单/⌘Q/托盘) 统一走
+            // menu::request_quit 的自定义菜单项 (已二次确认), 确认后才调用 app.exit(0),
+            // 此处仅做子进程清理. Dock 右键 Quit 走系统 terminate, 会直接到这里 (无确认).
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
                 app.state::<state::AppState>().kill_child();
             }
             _ => {}
@@ -103,7 +84,7 @@ fn main() {
 /// 菜单栏托盘: 左键/菜单 显示隐藏窗口; 退出菜单才真正结束 (同时杀掉 dsh).
 fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, TRAY_TOGGLE, "显示/隐藏窗口", true, None::<&str>)?;
-    let quit = PredefinedMenuItem::quit(app, Some("退出 DASH"))?;
+    let quit = MenuItem::with_id(app, menu::ID_QUIT, "退出 DASH", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&toggle, &quit])?;
     TrayIconBuilder::new()
         .icon(app.default_window_icon().expect("default icon").clone())
@@ -113,6 +94,8 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             if event.id().as_ref() == TRAY_TOGGLE {
                 toggle_window(app);
+            } else if event.id().as_ref() == menu::ID_QUIT {
+                menu::request_quit(app.clone());
             }
         })
         .on_tray_icon_event(|tray, event| {

@@ -1,6 +1,6 @@
 [package]
 name = "dashahan"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "大傻憨: desktop wrapper for deepseek-harness"
 
