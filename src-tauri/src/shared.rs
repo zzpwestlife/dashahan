@@ -156,6 +156,140 @@ pub fn write_config(app: &AppHandle, cfg: &Config) -> std::io::Result<()> {
     fs::write(path, serde_json::to_string_pretty(cfg).expect("config serialize"))
 }
 
+// ---------- macOS 钥匙串 (API Key 防丢) ----------
+
+pub const KEYCHAIN_SERVICE: &str = "com.solo.dashahan";
+pub const KEYCHAIN_ACCOUNT: &str = "deepseek-api-key";
+
+/// 把 key 写入钥匙串 (已存在则覆盖). 失败返回 false (调用方可忽略, config 仍是兜底).
+pub fn keychain_save(value: &str) -> bool {
+    std::process::Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-w",
+            value,
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// 从钥匙串读 key; 不存在/失败返回 None.
+pub fn keychain_load() -> Option<String> {
+    let out = std::process::Command::new("security")
+        .args([
+            "find-generic-password",
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-w",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// 读取 API Key: config.json 优先; 缺失时从钥匙串恢复并写回 config.
+pub fn read_api_key(app: &AppHandle) -> Option<String> {
+    let cfg = read_config(app);
+    if let Some(k) = cfg.api_key.filter(|k| !k.is_empty()) {
+        return Some(k);
+    }
+    if let Some(k) = keychain_load() {
+        let mut c = read_config(app);
+        c.api_key = Some(k.clone());
+        c.key_asked = true;
+        let _ = write_config(app, &c);
+        return Some(k);
+    }
+    None
+}
+
+/// 保存 API Key: 写 config + 同步钥匙串.
+pub fn save_api_key(app: &AppHandle, key: &str) {
+    let mut c = read_config(app);
+    c.api_key = Some(key.to_string());
+    c.key_asked = true;
+    let _ = write_config(app, &c);
+    let _ = keychain_save(key);
+}
+
+/// 启动时把 config 里的 key 同步进钥匙串 (若缺失或不同).
+pub fn sync_keychain(app: &AppHandle) {
+    if let Some(k) = read_config(app).api_key {
+        if keychain_load().as_deref() != Some(k.as_str()) {
+            let _ = keychain_save(&k);
+        }
+    }
+}
+
+// ---------- 配置自动备份 (防数据目录被外部清空) ----------
+
+/// 每次启动把关键配置备份到 ~/DASH-backup/<时间戳>/, 只保留最近 5 份.
+/// 排除 node_modules/npm-cache/logs; 包含 config.json、dsh-home(含 sessions/storages/profiles).
+pub fn backup_config(app: &AppHandle) -> Result<(), String> {
+    let data = data_dir(app);
+    if !data.join("dsh-home").exists() {
+        return Ok(()); // dsh 尚未安装, 无备份价值
+    }
+    let home = std::env::var("HOME").map_err(|_| "HOME 不可用".to_string())?;
+    let root = Path::new(&home).join("DASH-backup");
+    let _ = fs::create_dir_all(&root);
+    let ts = String::from_utf8_lossy(
+        &std::process::Command::new("date")
+            .args(["+%Y%m%d-%H%M%S"])
+            .output()
+            .map_err(|e| e.to_string())?
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let dst = root.join(&ts);
+    let _ = fs::create_dir_all(&dst);
+    let status = std::process::Command::new("rsync")
+        .args([
+            "-a",
+            "--exclude",
+            "node_modules",
+            "--exclude",
+            "npm-cache",
+            "--exclude",
+            "logs",
+        ])
+        .arg(format!("{}/", data.display()))
+        .arg(format!("{}/", dst.display()))
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("rsync 退出码 {:?}", status.code()));
+    }
+    // 只保留最近 5 份
+    let mut entries: Vec<_> = fs::read_dir(&root)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    while entries.len() > 5 {
+        let oldest = entries.remove(0);
+        let _ = fs::remove_dir_all(oldest.path());
+    }
+    Ok(())
+}
+
 pub fn log_line(app: &AppHandle, message: &str) {
     let path = data_dir(app).join("logs/boot.log");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {

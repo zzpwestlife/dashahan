@@ -36,8 +36,15 @@ async fn flow(app: AppHandle) {
         }
     }
 
+    // 防丢: 启动时把关键配置备份一份 (失败不阻塞, 仅记录)
+    if let Err(e) = shared::backup_config(&app) {
+        shared::log_line(&app, &format!("backup 失败: {e}"));
+    }
+    // 防丢: 把 config 里的 key 同步进钥匙串
+    shared::sync_keychain(&app);
+
     let cfg = shared::read_config(&app);
-    if cfg.api_key.is_none() && !cfg.key_asked {
+    if shared::read_api_key(&app).is_none() && !cfg.key_asked {
         shared::progress(&app, "请输入 API Key（可跳过）…");
         // 原生对话框收集 key (可选): 弹一次, 取消不阻塞, 之后可在 dsh 设置页或菜单添加
         let key = tauri::async_runtime::spawn_blocking(|| {
@@ -47,10 +54,7 @@ async fn flow(app: AppHandle) {
         .ok()
         .flatten();
         if let Some(k) = key {
-            let mut c = shared::read_config(&app);
-            c.api_key = Some(k);
-            c.key_asked = true;
-            let _ = shared::write_config(&app, &c);
+            shared::save_api_key(&app, &k);
         } else {
             let mut c = shared::read_config(&app);
             c.key_asked = true;

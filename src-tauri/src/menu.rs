@@ -48,10 +48,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
 fn prompt_and_set_key(app: AppHandle) {
     std::thread::spawn(move || {
         if let Some(key) = shared::prompt_api_key("请输入 DeepSeek API Key（可稍后在 dsh 设置中添加）") {
-            let mut cfg = shared::read_config(&app);
-            cfg.api_key = Some(key);
-            cfg.key_asked = true;
-            let _ = shared::write_config(&app, &cfg);
+            shared::save_api_key(&app, &key);
             app.state::<AppState>().kill_child();
             if let Some(w) = app.get_webview_window("main") {
                 // 回到启动页, 由 flow 重新驱动

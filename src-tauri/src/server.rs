@@ -44,8 +44,7 @@ pub fn launch(app: &AppHandle) -> Result<String, String> {
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));
 
-    let cfg = shared::read_config(app);
-    if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+    if let Some(key) = shared::read_api_key(app) {
         cmd.env("DEEPSEEK_API_KEY", key);
     }
 
