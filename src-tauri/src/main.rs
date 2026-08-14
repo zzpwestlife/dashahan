@@ -79,9 +79,10 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
         .tooltip("DASH - dsh web")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            TRAY_TOGGLE => toggle_window(app),
-            _ => {}
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == TRAY_TOGGLE {
+                toggle_window(app);
+            }
         })
         .on_tray_icon_event(|tray, event| {
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};

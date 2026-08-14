@@ -36,12 +36,10 @@ async fn flow(app: AppHandle) {
         }
     }
 
-    // 防丢: 启动时把关键配置备份一份 (失败不阻塞, 仅记录)
+    // 防丢: 启动时把关键配置备份一份 (失败不阻塞, 仅记录; API Key 在钥匙串, 不进备份)
     if let Err(e) = shared::backup_config(&app) {
         shared::log_line(&app, &format!("backup 失败: {e}"));
     }
-    // 防丢: 把 config 里的 key 同步进钥匙串
-    shared::sync_keychain(&app);
 
     let cfg = shared::read_config(&app);
     if shared::read_api_key(&app).is_none() && !cfg.key_asked {
@@ -83,7 +81,7 @@ fn launch_with_retry(app: &AppHandle) -> Result<String, String> {
             shared::log_line(app, &format!("首次启动异常: {first}"));
             app.state::<AppState>().kill_child();
             std::thread::sleep(std::time::Duration::from_secs(2));
-            shared::progress(&app, "服务启动异常, 自动重试…");
+            shared::progress(app, "服务启动异常, 自动重试…");
             match server::launch(app) {
                 Ok(url) => {
                     shared::log_line(app, "重试后启动成功");

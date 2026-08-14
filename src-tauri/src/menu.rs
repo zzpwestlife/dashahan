@@ -12,7 +12,7 @@ const ID_APIKEY: &str = "set-api-key";
 const ID_LOGS: &str = "open-logs";
 
 pub fn install(app: &App) -> tauri::Result<()> {
-    let update = MenuItem::with_id(app, ID_UPDATE, "更新 dsh", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, ID_UPDATE, "重装 dsh", true, None::<&str>)?;
     let apikey = MenuItem::with_id(app, ID_APIKEY, "设置 API Key", true, None::<&str>)?;
     let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;

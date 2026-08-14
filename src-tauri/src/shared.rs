@@ -9,8 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default)]
-    pub api_key: Option<String>,
+    /// 是否已询问过 API Key (避免每次启动都弹框); 真值只存钥匙串, config 不落盘明文.
     #[serde(default)]
     pub key_asked: bool,
 }
@@ -27,7 +26,29 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
 /// 查找 Node.js: 优先 app 内嵌的 (完整版打包在 Resources/node-dist), 再 PATH, 再常见位置.
 /// 优先返回"带 npm"的 node (Homebrew 新版 node 公式已不含 npm, 需跳过);
 /// 若所有候选都不带 npm, 回退到第一个可用的 node (供 dsh web 运行).
-pub fn find_node(app: &AppHandle) -> Option<PathBuf> {
+/// 从候选里挑 node: 优先"带 npm"的 (Homebrew 新版 node 公式已不含 npm, 需跳过),
+/// 都不带则回退第一个存在的 (供 dsh web 运行). 去重, 跳过不存在的路径.
+fn pick_node(candidates: &[PathBuf]) -> Option<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    let mut fallback: Option<PathBuf> = None;
+    for c in candidates {
+        if !c.is_file() {
+            continue;
+        }
+        if seen.insert(c.clone()) {
+            if npm_cli(c).is_some() {
+                return Some(c.clone());
+            }
+            if fallback.is_none() {
+                fallback = Some(c.clone());
+            }
+        }
+    }
+    fallback
+}
+
+/// 收集所有候选 node 路径: 内嵌 (完整版) -> PATH -> 常见位置 -> nvm/mise.
+fn node_candidates(app: &AppHandle) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     // 1) 内嵌 Node (完整版构建, 轻量版无此目录自动跳过)
     if let Ok(res) = app.path().resource_dir() {
@@ -55,22 +76,11 @@ pub fn find_node(app: &AppHandle) -> Option<PathBuf> {
             }
         }
     }
-    let mut seen = std::collections::HashSet::new();
-    let mut fallback: Option<PathBuf> = None;
-    for c in candidates {
-        if !c.is_file() {
-            continue;
-        }
-        if seen.insert(c.clone()) {
-            if npm_cli(&c).is_some() {
-                return Some(c);
-            }
-            if fallback.is_none() {
-                fallback = Some(c);
-            }
-        }
-    }
-    fallback
+    candidates
+}
+
+pub fn find_node(app: &AppHandle) -> Option<PathBuf> {
+    pick_node(&node_candidates(app))
 }
 
 /// npm CLI 入口 (node <npm-cli.js>), 兼容 homebrew/nvm/官方 tarball 布局.
@@ -208,38 +218,38 @@ pub fn keychain_load() -> Option<String> {
     }
 }
 
-/// 读取 API Key: config.json 优先; 缺失时从钥匙串恢复并写回 config.
+/// 读取 API Key: 唯一真值在钥匙串. 老版本 config.json 里的明文 key 会先迁移到钥匙串并清理.
 pub fn read_api_key(app: &AppHandle) -> Option<String> {
-    let cfg = read_config(app);
-    if let Some(k) = cfg.api_key.filter(|k| !k.is_empty()) {
-        return Some(k);
-    }
-    if let Some(k) = keychain_load() {
-        let mut c = read_config(app);
-        c.api_key = Some(k.clone());
-        c.key_asked = true;
-        let _ = write_config(app, &c);
-        return Some(k);
-    }
-    None
+    migrate_legacy_key(app);
+    keychain_load()
 }
 
-/// 保存 API Key: 写 config + 同步钥匙串.
+/// 老版本 (≤v0.1.4) 把 key 明文存在 config.json; 现在只存标记, 真值在钥匙串.
+/// 读到遗留明文时: 先写入钥匙串 (成功才清理, 防止 key 丢失), 再标记 key_asked.
+fn migrate_legacy_key(app: &AppHandle) {
+    let path = data_dir(app).join("config.json");
+    let Ok(raw) = fs::read_to_string(&path) else { return };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    let Some(key) = v
+        .get("api_key")
+        .and_then(|k| k.as_str())
+        .filter(|k| !k.is_empty())
+    else {
+        return; // 无遗留明文, 不动
+    };
+    if keychain_save(key) {
+        let mut cfg: Config = serde_json::from_value(v).unwrap_or_default();
+        cfg.key_asked = true;
+        let _ = write_config(app, &cfg);
+    }
+}
+
+/// 保存 API Key: 只写钥匙串; config 仅记录"已设置"标记 (不落盘明文).
 pub fn save_api_key(app: &AppHandle, key: &str) {
+    let _ = keychain_save(key);
     let mut c = read_config(app);
-    c.api_key = Some(key.to_string());
     c.key_asked = true;
     let _ = write_config(app, &c);
-    let _ = keychain_save(key);
-}
-
-/// 启动时把 config 里的 key 同步进钥匙串 (若缺失或不同).
-pub fn sync_keychain(app: &AppHandle) {
-    if let Some(k) = read_config(app).api_key {
-        if keychain_load().as_deref() != Some(k.as_str()) {
-            let _ = keychain_save(&k);
-        }
-    }
 }
 
 // ---------- 配置自动备份 (防数据目录被外部清空) ----------
@@ -282,17 +292,20 @@ pub fn backup_config(app: &AppHandle) -> Result<(), String> {
     if !status.success() {
         return Err(format!("rsync 退出码 {:?}", status.code()));
     }
-    // 只保留最近 5 份
-    let mut entries: Vec<_> = fs::read_dir(&root)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .collect();
+    prune_backups(&root, 5);
+    Ok(())
+}
+
+/// 只保留 root 下按名称排序最近的 keep 份, 删除更旧的.
+fn prune_backups(root: &Path, keep: usize) {
+    let Ok(mut entries) = fs::read_dir(root).map(|rd| rd.flatten().collect::<Vec<_>>()) else {
+        return;
+    };
     entries.sort_by_key(|e| e.file_name());
-    while entries.len() > 5 {
+    while entries.len() > keep {
         let oldest = entries.remove(0);
         let _ = fs::remove_dir_all(oldest.path());
     }
-    Ok(())
 }
 
 pub fn log_line(app: &AppHandle, message: &str) {
@@ -311,4 +324,127 @@ pub fn progress(app: &AppHandle, message: &str) {
 pub fn boot_error(app: &AppHandle, message: &str) {
     log_line(app, &format!("error: {message}"));
     let _ = app.emit("boot-error", serde_json::json!({ "message": message }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tempdir(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "dashahan_test_{tag}_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn touch(p: &Path) {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, "").unwrap();
+    }
+
+    // macOS 上 /var -> /private/var 符号链接: 规范化后再比较路径
+    fn canon(p: PathBuf) -> PathBuf {
+        fs::canonicalize(&p).unwrap_or(p)
+    }
+
+    #[test]
+    fn npm_cli_std_layout() {
+        let tmp = tempdir("npm_cli_std");
+        let node = tmp.join("bin/node");
+        touch(&node);
+        let cli = tmp.join("lib/node_modules/npm/bin/npm-cli.js");
+        touch(&cli);
+        assert_eq!(npm_cli(&node).map(canon), Some(canon(cli)));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn npm_cli_two_level_layout() {
+        // node 在 <prefix>/<sub>/bin 时, npm-cli 在 <prefix>/lib (../../lib 分支)
+        let tmp = tempdir("npm_cli_two");
+        let node = tmp.join("a/b/bin/node");
+        touch(&node);
+        let cli = tmp.join("a/lib/node_modules/npm/bin/npm-cli.js");
+        touch(&cli);
+        assert_eq!(npm_cli(&node).map(canon), Some(canon(cli)));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn npm_cli_three_level_layout() {
+        // node 在 <prefix>/<x>/<y>/bin 时, npm-cli 在 <prefix>/lib (../../../lib 分支)
+        let tmp = tempdir("npm_cli_three");
+        let node = tmp.join("a/b/c/bin/node");
+        touch(&node);
+        let cli = tmp.join("a/lib/node_modules/npm/bin/npm-cli.js");
+        touch(&cli);
+        assert_eq!(npm_cli(&node).map(canon), Some(canon(cli)));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn npm_cli_missing_returns_none() {
+        let tmp = tempdir("npm_cli_missing");
+        let node = tmp.join("bin/node");
+        touch(&node);
+        assert_eq!(npm_cli(&node), None);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pick_node_prefers_one_with_npm() {
+        let tmp = tempdir("pick_node_pref");
+        let bare = tmp.join("bare/bin/node");
+        touch(&bare);
+        let with_npm = tmp.join("withnpm/bin/node");
+        touch(&with_npm);
+        let cli = tmp.join("withnpm/lib/node_modules/npm/bin/npm-cli.js");
+        touch(&cli);
+        let got = pick_node(&[bare.clone(), with_npm.clone()]).unwrap();
+        assert_eq!(got, with_npm);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pick_node_falls_back_to_first_existing() {
+        let tmp = tempdir("pick_node_fb");
+        let missing = tmp.join("missing/bin/node");
+        let bare = tmp.join("bare/bin/node");
+        touch(&bare);
+        let got = pick_node(&[missing, bare.clone()]).unwrap();
+        assert_eq!(got, bare);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pick_node_skips_missing_and_dedups() {
+        let tmp = tempdir("pick_node_dedup");
+        let missing = tmp.join("missing/bin/node");
+        let bare = tmp.join("bare/bin/node");
+        touch(&bare);
+        assert_eq!(pick_node(&[missing, bare.clone(), bare.clone()]), Some(bare));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prune_backups_keeps_newest_five() {
+        let tmp = tempdir("prune");
+        for i in 1..=7 {
+            fs::create_dir_all(tmp.join(format!("20260814-{i:04}"))).unwrap();
+        }
+        prune_backups(&tmp, 5);
+        let mut left: Vec<_> = fs::read_dir(&tmp)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(left.len(), 5);
+        assert_eq!(left.first().unwrap(), "20260814-0003"); // 最旧的 0001/0002 被删
+        assert_eq!(left.last().unwrap(), "20260814-0007");
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
