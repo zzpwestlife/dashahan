@@ -4,8 +4,10 @@
 # 退出码: 0=通过, 1=失败 (可作为 CI 发版门禁)
 set -uo pipefail
 
-APP="$1"
-if [ -z "$APP" ]; then
+# set -u 下不能直接读未设置的 $1, 用 $# 短路保护
+if [ $# -ge 1 ] && [ -n "$1" ]; then
+  APP="$1"
+else
   APP="/Applications/DASH.app"
 fi
 D="$HOME/Library/Application Support/com.solo.dashahan"
