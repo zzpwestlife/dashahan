@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,8 +21,12 @@ jobs:
       - name: 安装 arm64 编译目标
         run: rustup target add aarch64-apple-darwin
 
-      - name: 安装依赖
-        run: npm install
+      - name: 安装依赖 (官方 registry, 绕过本机内网 lock)
+        run: |
+          # 仓库 package-lock.json 锁定了内网 registry (registry.npm.oa.com),
+          # GitHub Actions runner 无法访问会 404; 删除后用官方 registry 重新解析.
+          rm -f package-lock.json
+          npm install --registry=https://registry.npmjs.org/
 
       - name: 构建轻量版 (arm64, 系统 Node)
         run: npm run build -- --target aarch64-apple-darwin
