@@ -24,11 +24,16 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
-/// 查找系统 Node.js: 先 PATH, 再常见安装位置 (Finder 启动时 PATH 不完整).
+/// 查找 Node.js: 优先 app 内嵌的 (完整版打包在 Resources/node-dist), 再 PATH, 再常见位置.
 /// 优先返回"带 npm"的 node (Homebrew 新版 node 公式已不含 npm, 需跳过);
 /// 若所有候选都不带 npm, 回退到第一个可用的 node (供 dsh web 运行).
-pub fn find_node() -> Option<PathBuf> {
+pub fn find_node(app: &AppHandle) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
+    // 1) 内嵌 Node (完整版构建, 轻量版无此目录自动跳过)
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("node-dist/bin/node"));
+    }
+    // 2) PATH
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             candidates.push(dir.join("node"));
@@ -127,7 +132,7 @@ pub fn prompt_api_key(message: &str) -> Option<String> {
 
 pub fn path_env(app: &AppHandle) -> String {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(node) = find_node() {
+    if let Some(node) = find_node(app) {
         if let Some(d) = node.parent() {
             dirs.push(d.to_path_buf());
         }

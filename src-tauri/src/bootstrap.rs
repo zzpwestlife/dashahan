@@ -63,7 +63,7 @@ async fn flow(app: AppHandle) {
     }
 
     shared::progress(&app, "正在启动本地服务…");
-    match server::launch(&app) {
+    match launch_with_retry(&app) {
         Ok(url) => {
             if let Some(w) = app.get_webview_window("main") {
                 if let Err(e) = w.navigate(url.parse().expect("valid url")) {
@@ -75,8 +75,28 @@ async fn flow(app: AppHandle) {
     }
 }
 
+/// 健康自愈: dsh web 启动失败/崩溃时自动重试一次 (杀残留 -> 重启), 两次失败才报错.
+fn launch_with_retry(app: &AppHandle) -> Result<String, String> {
+    match server::launch(app) {
+        Ok(url) => Ok(url),
+        Err(first) => {
+            shared::log_line(app, &format!("首次启动异常: {first}"));
+            app.state::<AppState>().kill_child();
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            shared::progress(&app, "服务启动异常, 自动重试…");
+            match server::launch(app) {
+                Ok(url) => {
+                    shared::log_line(app, "重试后启动成功");
+                    Ok(url)
+                }
+                Err(second) => Err(format!("首次: {first}\n重试: {second}")),
+            }
+        }
+    }
+}
+
 pub fn npm_install(app: &AppHandle) -> Result<(), String> {
-    let node = shared::find_node()
+    let node = shared::find_node(app)
         .ok_or("未检测到 Node.js. 请先安装 Node.js (https://nodejs.org) 后再试.")?;
     let npm_cli = shared::npm_cli(&node)
         .ok_or("找到 Node.js 但未找到 npm, 请确认 Node 安装完整.")?;

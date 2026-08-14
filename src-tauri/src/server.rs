@@ -34,7 +34,7 @@ pub fn launch(app: &AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     let log_err = log.try_clone().map_err(|e| e.to_string())?;
 
-    let node = shared::find_node()
+    let node = shared::find_node(app)
         .ok_or("未检测到 Node.js. 请先安装 Node.js (https://nodejs.org) 后再试.")?;
     let mut cmd = Command::new(node);
     cmd.arg(shared::dsh_bin(app))

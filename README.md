@@ -35,15 +35,24 @@ Double-click macOS app wrapping deepseek-harness (`dsh web`). No `npx` commands 
 要求: macOS arm64, Rust (`brew install rust`), Node (系统已装).
 
 ```sh
-scripts/make-icon.sh       # 生成 🐶 图标集 (已有图标可跳过)
+scripts/make-icon.sh        # 生成 🐶 图标集 (已有图标可跳过)
 npm install
-npm run build              # 产出 src-tauri/target/release/bundle/dmg/
+npm run build               # 轻量版 (3.7MB, 用系统 Node, 自用)
+./scripts/smoke-test.sh     # 冒烟测试: 启动→dsh→HTTP200→钥匙串
 ```
 
-## 菜单 / Menu
+完整版 (内嵌 Node, 对外分发, 开箱即用, 约 126MB):
 
+```sh
+./scripts/fetch-node-dist.sh   # 下载 Node 到 src-tauri/resources/node-dist
+cd src-tauri && npx tauri build --config tauri.full.conf.json
+```
+
+## 菜单与托盘 / Menu & Tray
+
+- **关窗不退出**: 关闭窗口只隐藏, dsh 后台保持运行; 点菜单栏 🐶 图标或再次双击可唤回.
 - `更新 dsh`: 重新执行 npm install (升级常量版本需改 `src-tauri/src/main.rs` 的 `DSH_VERSION`).
-- `设置 API Key`: 弹出 macOS 原生对话框输入 DeepSeek API Key (写入 app config, 注入 `DEEPSEEK_API_KEY`). 首次启动无 key 时同样弹原生对话框.
+- `设置 API Key`: 弹出 macOS 原生对话框输入 DeepSeek API Key (写入 app config + 钥匙串, 注入 `DEEPSEEK_API_KEY`). 首次启动无 key 时同样弹原生对话框 (可选, 可跳过).
 - `打开日志目录`: 定位 `logs/dsh.log` 与 `logs/npm.log`.
 
 ## 升级 dsh (上游更新) / Updating dsh
