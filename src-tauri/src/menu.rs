@@ -14,11 +14,10 @@ const ID_DASH_UPDATE: &str = "check-dash-update";
 const ID_APIKEY: &str = "set-api-key";
 const ID_NOTIFY: &str = "notify-toggle";
 const ID_LOGS: &str = "open-logs";
+const ID_RESET: &str = "reset-conversations";
 
 pub fn install(app: &App) -> tauri::Result<()> {
-    let update = MenuItem::with_id(app, ID_UPDATE, "重装 dsh", true, None::<&str>)?;
-    let dsh_update = MenuItem::with_id(app, ID_DSH_UPDATE, "检查 dsh 更新", true, None::<&str>)?;
-    let dash_update = MenuItem::with_id(app, ID_DASH_UPDATE, "检查 DASH 更新", true, None::<&str>)?;
+    // 日常项
     let apikey = MenuItem::with_id(app, ID_APIKEY, "设置 API Key", true, None::<&str>)?;
     let notify_checked = shared::read_config(app.handle()).notify_enabled;
     let notify = tauri::menu::CheckMenuItem::with_id(
@@ -30,12 +29,38 @@ pub fn install(app: &App) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
+    let reset = MenuItem::with_id(app, ID_RESET, "清空对话历史", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;
+    // 「检查更新」子菜单: 两条更新线 + 重装 dsh (收起, 避免主菜单拥挤)
+    let dsh_update = MenuItem::with_id(app, ID_DSH_UPDATE, "检查 dsh 更新", true, None::<&str>)?;
+    let dash_update = MenuItem::with_id(app, ID_DASH_UPDATE, "检查 DASH 更新", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, ID_UPDATE, "重装 dsh", true, None::<&str>)?;
+    let updates = Submenu::with_items(
+        app,
+        "检查更新",
+        true,
+        &[
+            &dsh_update,
+            &dash_update,
+            &PredefinedMenuItem::separator(app)?,
+            &update,
+        ],
+    )?;
     let sub = Submenu::with_items(
         app,
         "大傻憨",
         true,
-        &[&update, &dsh_update, &dash_update, &apikey, &notify, &logs, &quit],
+        &[
+            &apikey,
+            &notify,
+            &PredefinedMenuItem::separator(app)?,
+            &updates,
+            &PredefinedMenuItem::separator(app)?,
+            &logs,
+            &reset,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )?;
     // 标准「编辑」菜单: 注册 ⌘C/⌘V/⌘X 等快捷键到响应链, 否则 WebView 输入框无法复制/粘贴
     let edit = Submenu::with_items(
@@ -62,6 +87,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         ID_APIKEY => prompt_and_set_key(app.clone()),
         ID_NOTIFY => toggle_notify(app.clone()),
         ID_LOGS => open_logs(app),
+        ID_RESET => reset_conversations(app.clone()),
         _ => {}
     });
     Ok(())
@@ -115,6 +141,7 @@ pub fn refresh_update_items(app: &AppHandle) {
 }
 
 /// 菜单「检查/升级 dsh」: 有缓存新版直接确认升级, 否则现查.
+/// 反馈走系统通知 (progress/emit 到远程页收不到, 是"点了没反应"的根因).
 fn handle_dsh_update(app: AppHandle) {
     std::thread::spawn(move || {
         let latest = match app
@@ -125,20 +152,21 @@ fn handle_dsh_update(app: AppHandle) {
             .and_then(|g| g.clone())
         {
             Some(v) => v,
-            None => match update::check_dsh(&app) {
-                Some(v) => v,
-                None => {
-                    shared::progress(&app, "dsh 已是最新版本");
-                    return;
+            None => {
+                shared::notify("检查 dsh 更新", "正在检查…");
+                match update::check_dsh(&app) {
+                    Some(v) => v,
+                    None => {
+                        shared::notify("检查 dsh 更新", "dsh 已是最新版本");
+                        return;
+                    }
                 }
-            },
+            }
         };
         if shared::confirm(&format!("升级 dsh 到 v{latest}?
 (将自动备份当前版本, 失败可回滚)")) {
-            match update::upgrade_dsh(&app) {
-                Ok(msg) => shared::progress(&app, &msg),
-                Err(e) => shared::boot_error(&app, &e),
-            }
+            // 结果反馈由 upgrade_dsh 内部 notify+alert 覆盖, 此处不重复弹窗
+            let _ = update::upgrade_dsh(&app);
         }
     });
 }
@@ -154,21 +182,26 @@ fn handle_dash_update(app: AppHandle) {
             .and_then(|g| g.clone())
         {
             Some(v) => v,
-            None => match update::check_dash(&app) {
-                Some(v) => v,
-                None => {
-                    shared::progress(&app, "DASH 已是最新版本");
-                    return;
+            None => {
+                shared::notify("检查 DASH 更新", "正在检查…");
+                match update::check_dash(&app) {
+                    Some(v) => v,
+                    None => {
+                        shared::notify("检查 DASH 更新", "DASH 已是最新版本");
+                        return;
+                    }
                 }
-            },
+            }
         };
         if shared::confirm(&format!(
             "更新 DASH 到 v{latest}?
 (将自动下载替换并重启, 失败自动恢复)"
         )) {
             match update::update_dash(&app) {
-                Ok(msg) => shared::progress(&app, &msg),
-                Err(e) => shared::boot_error(&app, &e),
+                // Ok = 已触发重启脚本, 进程即将退出, 无需再提示
+                Ok(_) => {}
+                // Err 时 update_dash 内部无弹窗, 这里补一个
+                Err(e) => shared::alert("DASH 更新失败", &e),
             }
         }
     });
@@ -192,4 +225,28 @@ fn prompt_and_set_key(app: AppHandle) {
 fn open_logs(app: &AppHandle) {
     let dir = shared::data_dir(app).join("logs");
     let _ = std::process::Command::new("open").arg(dir).spawn();
+}
+
+/// 菜单「清空对话历史」: 确认后先备份 dsh-home, 删除 sessions 目录 (含损坏记录),
+/// 再重启 dsh 重建干净的会话并刷新窗口. 用于修复 "Failed to load history: corrupt session log"
+/// 这类 dsh 会话日志损坏导致的打不开历史问题.
+fn reset_conversations(app: AppHandle) {
+    std::thread::spawn(move || {
+        if !shared::confirm(
+            "清空所有对话历史？\n将删除 dsh 全部会话记录（含损坏记录），用于修复 “Failed to load history” 等损坏问题。\n不可撤销，但重启前已自动备份到 ~/DASH-backup。",
+        ) {
+            return;
+        }
+        // 先快照当前数据 (含 dsh-home), 失败不阻塞
+        if let Err(e) = shared::backup_config(&app) {
+            shared::log_line(&app, &format!("reset 前备份失败: {e}"));
+        }
+        // 停 dsh 再删, 避免文件被占用 (flow 内部也会 kill_child, 双杀无害)
+        app.state::<AppState>().kill_child();
+        let sess = shared::data_dir(&app).join("dsh-home/sessions");
+        let _ = std::fs::remove_dir_all(&sess);
+        // 重启 dsh: 重建干净会话目录并刷新窗口
+        bootstrap::start(app);
+        shared::notify("对话历史已清空", "dsh 已重启，损坏记录已移除。");
+    });
 }

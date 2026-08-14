@@ -21,6 +21,8 @@ pub struct AppState {
     pub notify_enabled: AtomicBool,
     /// 上次发通知的时间 (10s 防抖; None = 从未发过)
     pub last_notify: Mutex<Option<Instant>>,
+    /// 退出二次确认: 用户确认后置 true, 避免 ExitRequested 重复弹窗/死循环
+    pub quit_confirmed: AtomicBool,
 }
 
 impl AppState {

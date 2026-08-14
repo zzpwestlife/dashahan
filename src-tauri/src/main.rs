@@ -70,10 +70,33 @@ fn main() {
         .invoke_handler(tauri::generate_handler![bootstrap::retry_boot])
         .build(tauri::generate_context!())
         .expect("大傻憨 build failed")
-        .run(|app, event| {
-            if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+        .run(|app, event| match event {
+            // 退出二次确认: 菜单/Cmd+Q/Dock 退出都走这里. 首次拦截并弹确认,
+            // 确认后置 quit_confirmed, 重新 exit 时放行并终止 dsh.
+            RunEvent::ExitRequested { api, .. } => {
+                let st = app.state::<state::AppState>();
+                if st.quit_confirmed.load(std::sync::atomic::Ordering::SeqCst) {
+                    st.kill_child();
+                } else {
+                    api.prevent_exit();
+                    let apph = app.clone();
+                    std::thread::spawn(move || {
+                        if shared::confirm(
+                            "确认退出 DASH？\n退出后本地 dsh 服务会停止，后台对话将关闭。",
+                        ) {
+                            apph
+                                .state::<state::AppState>()
+                                .quit_confirmed
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
+                            apph.exit(0);
+                        }
+                    });
+                }
+            }
+            RunEvent::Exit => {
                 app.state::<state::AppState>().kill_child();
             }
+            _ => {}
         });
 }
 
