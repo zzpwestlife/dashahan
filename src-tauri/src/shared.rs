@@ -326,6 +326,125 @@ pub fn boot_error(app: &AppHandle, message: &str) {
     let _ = app.emit("boot-error", serde_json::json!({ "message": message }));
 }
 
+// ---------- 版本与更新 ----------
+
+/// 语义化版本比较: a < b (如 "0.1.0-rc.6" < "0.2.0").
+/// 任一侧解析失败视为不升级 (返回 false), 保证异常不触发升级.
+pub fn version_less(a: &str, b: &str) -> bool {
+    match (semver::Version::parse(a), semver::Version::parse(b)) {
+        (Ok(va), Ok(vb)) => va < vb,
+        _ => false,
+    }
+}
+
+/// 实际安装的 dsh 版本 (读 node_modules/@deepseek-ai/dsh/package.json).
+pub fn installed_dsh_version(app: &AppHandle) -> Option<String> {
+    let bin = dsh_bin(app);
+    let pkg_root = bin.parent()?.parent()?; // .../node_modules/@deepseek-ai/dsh
+    let raw = fs::read_to_string(pkg_root.join("package.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("version")?.as_str().map(|s| s.to_string())
+}
+
+/// curl 拉取 URL 文本 (macOS 自带 curl; 失败返回 None).
+fn fetch_text(url: &str, extra: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("curl")
+        .args(["-sS", "-L", "-m", "15"])
+        .args(extra)
+        .arg(url)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// npm 官方 registry 上 @deepseek-ai/dsh 的 latest 版本.
+pub fn fetch_dsh_latest() -> Option<String> {
+    let body = fetch_text("https://registry.npmjs.org/@deepseek-ai/dsh/latest", &[])?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    v.get("version")?.as_str().map(|s| s.to_string())
+}
+
+/// GitHub Releases 最新 tag (去掉 v 前缀).
+pub fn fetch_dash_latest() -> Option<String> {
+    let body = fetch_text(
+        "https://api.github.com/repos/zzpwestlife/dashahan/releases/latest",
+        &["-H", "User-Agent: dashahan-updater"],
+    )?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    v.get("tag_name")?
+        .as_str()
+        .map(|s| s.trim_start_matches('v').to_string())
+}
+
+/// 备份当前 dsh 安装 (data/backups/dsh), 供升级失败回滚.
+pub fn backup_dsh(app: &AppHandle) -> Result<PathBuf, String> {
+    let src = dsh_bin(app).parent().and_then(|p| p.parent()).ok_or("路径异常")?.to_path_buf();
+    if !src.join("package.json").is_file() {
+        return Err("dsh 尚未安装, 无需备份".to_string());
+    }
+    let dst = data_dir(app).join("backups/dsh");
+    let _ = fs::remove_dir_all(&dst);
+    fs::create_dir_all(dst.parent().ok_or("路径异常")?).map_err(|e| e.to_string())?;
+    let st = std::process::Command::new("cp")
+        .arg("-R")
+        .arg(&src)
+        .arg(&dst)
+        .status()
+        .map_err(|e| format!("cp 启动失败: {e}"))?;
+    if st.success() {
+        Ok(dst)
+    } else {
+        Err(format!("备份失败 (cp 退出码 {:?})", st.code()))
+    }
+}
+
+/// 从备份恢复 dsh (升级失败回滚).
+pub fn restore_dsh(app: &AppHandle) -> Result<(), String> {
+    let src = data_dir(app).join("backups/dsh");
+    if !src.join("package.json").is_file() {
+        return Err("无可用备份".to_string());
+    }
+    let dst = dsh_bin(app).parent().and_then(|p| p.parent()).ok_or("路径异常")?.to_path_buf();
+    let _ = fs::remove_dir_all(&dst);
+    fs::create_dir_all(dst.parent().ok_or("路径异常")?).map_err(|e| e.to_string())?;
+    let st = std::process::Command::new("cp")
+        .arg("-R")
+        .arg(&src)
+        .arg(&dst)
+        .status()
+        .map_err(|e| format!("cp 启动失败: {e}"))?;
+    if st.success() {
+        Ok(())
+    } else {
+        Err(format!("恢复失败 (cp 退出码 {:?})", st.code()))
+    }
+}
+
+/// 是否完整版 (内嵌 Node): 用于决定下载 full 还是 lite 的 DASH zip.
+pub fn has_embedded_node(app: &AppHandle) -> bool {
+    app.path()
+        .resource_dir()
+        .map(|r| r.join("node-dist/bin/node").is_file())
+        .unwrap_or(false)
+}
+
+/// macOS 原生确认对话框; 返回 true 表示用户点了"确定".
+pub fn confirm(message: &str) -> bool {
+    let script = format!(
+        "display dialog \"{}\" buttons {{\"取消\",\"确定\"}} default button \"确定\"",
+        message
+    );
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +565,16 @@ mod tests {
         assert_eq!(left.first().unwrap(), "20260814-0003"); // 最旧的 0001/0002 被删
         assert_eq!(left.last().unwrap(), "20260814-0007");
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn version_less_compare() {
+        assert!(version_less("0.1.0-rc.6", "0.2.0"));
+        assert!(version_less("0.1.0-rc.6", "0.1.0-rc.7"));
+        assert!(version_less("0.1.5", "0.1.6"));
+        assert!(!version_less("0.2.0", "0.1.0-rc.6"));
+        assert!(!version_less("0.1.5", "0.1.5"));
+        assert!(!version_less("garbage", "0.1.0"));
+        assert!(!version_less("0.1.0", "garbage"));
     }
 }

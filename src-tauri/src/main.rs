@@ -8,6 +8,7 @@ mod menu;
 mod server;
 mod shared;
 mod state;
+mod update;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -50,6 +51,7 @@ fn main() {
             install_tray(app)?;
             start_heal_watchdog(app.handle().clone());
             bootstrap::start(app.handle().clone());
+            update::check_all_background(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

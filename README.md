@@ -46,18 +46,17 @@ cd src-tauri && npx tauri build --config tauri.full.conf.json
 
 ## 菜单与托盘
 
-- **重装 dsh**: 重新执行 npm install (升级 dsh 版本需改 `src-tauri/src/main.rs` 的 `DSH_VERSION` 并重新构建).
-- **设置 API Key**: 写入 config + 钥匙串, 注入 `DEEPSEEK_API_KEY`.
+- **重装 dsh**: 重新 npm install 出厂默认版本 (`src-tauri/src/main.rs` 的 `DSH_VERSION`, 修复安装用).
+- **检查 dsh 更新 / 升级 dsh 到 vX.Y.Z**: 启动自动静默检测 npm 官方最新版; 一键升级 dsh (自动备份, 失败回滚, 无需重建 app).
+- **检查 DASH 更新 / 更新 DASH 到 vX.Y.Z**: 检测 GitHub 新版本; 一键自动下载替换并重启 (失败自动恢复).
+- **设置 API Key**: 写入钥匙串, 注入 `DEEPSEEK_API_KEY`.
 - **打开日志目录**: `logs/dsh.log` 与 `logs/npm.log`.
 
-## 升级 dsh
+## 升级
 
-1. `./scripts/check-dsh-update.sh` 检查新版本.
-2. 修改 `src-tauri/src/main.rs` 的 `DSH_VERSION`.
-3. 重建后验证: web 能启动、页面 200、能真实对话、profile 结构无破坏性变化、老 dsh-home 兼容.
-4. DASH 版本号 +1, 发布新 Release, notes 注明内含 dsh 版本.
-
-> 已知限制: 菜单「重装 dsh」安装的是当前二进制锁定的版本, 老用户需下载新版才能升级.
+- **升级 dsh**: 菜单一键完成 (检测 npm 最新版 → 备份 → 安装 → 重启, 失败自动回滚), 或等启动时的自动检测提示. 上游大版本变更后注意 dsh-home/profile 兼容性, 见 [DEV-NOTES.md](DEV-NOTES.md).
+- **升级 DASH**: 菜单一键完成 (自动下载对应版本 zip → 替换 → 重启).
+- 发版流程 (改 DSH_VERSION / bump 版本 / 打 tag 触发 CI) 见 [DEV-NOTES.md](DEV-NOTES.md).
 
 ## 排障
 

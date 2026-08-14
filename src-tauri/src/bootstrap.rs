@@ -94,6 +94,12 @@ fn launch_with_retry(app: &AppHandle) -> Result<String, String> {
 }
 
 pub fn npm_install(app: &AppHandle) -> Result<(), String> {
+    npm_install_version(app, crate::DSH_PACKAGE, crate::DSH_VERSION)
+}
+
+/// 安装指定版本 dsh. 显式官方 registry: 绕过用户 ~/.npmrc 的内网镜像
+/// (如腾讯 registry.npm.oa.com, 上面没有 @deepseek-ai/dsh 会 404).
+pub fn npm_install_version(app: &AppHandle, pkg: &str, version: &str) -> Result<(), String> {
     let node = shared::find_node(app)
         .ok_or("未检测到 Node.js. 请先安装 Node.js (https://nodejs.org) 后再试.")?;
     let npm_cli = shared::npm_cli(&node)
@@ -113,10 +119,11 @@ pub fn npm_install(app: &AppHandle) -> Result<(), String> {
             "install",
             "--prefix",
             &data.to_string_lossy(),
-            &format!("{}@{}", crate::DSH_PACKAGE, crate::DSH_VERSION),
+            &format!("{pkg}@{version}"),
             "--no-audit",
             "--no-fund",
             "--loglevel=warn",
+            "--registry=https://registry.npmjs.org/",
         ])
         .env("PATH", shared::path_env(app))
         .env("npm_config_cache", data.join("npm-cache"))
@@ -134,6 +141,18 @@ pub fn npm_install(app: &AppHandle) -> Result<(), String> {
             log_path.display()
         ))
     }
+}
+
+/// 重启 dsh web: 杀残留 -> 启动 -> 导航窗口 (升级/回滚后复用).
+pub fn restart_dsh(app: &AppHandle) -> Result<String, String> {
+    app.state::<AppState>().kill_child();
+    let url = server::launch(app)?;
+    if let Some(w) = app.get_webview_window("main") {
+        if let Err(e) = w.navigate(url.parse().expect("valid url")) {
+            shared::boot_error(app, &format!("页面加载失败: {e}"));
+        }
+    }
+    Ok(url)
 }
 
 #[tauri::command]

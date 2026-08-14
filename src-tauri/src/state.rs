@@ -13,6 +13,10 @@ pub struct AppState {
     pub dsh_url: Mutex<Option<String>>,
     /// 插件加载失败自愈次数 (最多 1 次, 防死循环)
     pub heal_count: AtomicU8,
+    /// 检测到的 dsh 最新版本 (有新版时才 Some)
+    pub dsh_latest: Mutex<Option<String>>,
+    /// 检测到的 DASH 最新版本 (有新版时才 Some)
+    pub dash_latest: Mutex<Option<String>>,
 }
 
 impl AppState {

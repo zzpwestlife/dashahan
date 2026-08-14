@@ -1,7 +1,34 @@
 # DASH 开发运维笔记 (DEV-NOTES)
 
 > 记录本项目踩过的坑与解决方案, 遇到类似问题时先来这里找答案.
-> 最后更新: 2026-08-14 (v0.1.5 发布, CI 全链路打通)
+> 最后更新: 2026-08-14 (v0.1.5 发布, CI 全链路打通; v0.1.6 增加升级提醒与一键升级)
+
+## 0. 升级提醒 + 一键升级 (v0.1.6 新功能)
+
+两条更新线, 启动时后台静默检查 (独立线程, 失败无感), 发现新版时菜单文案自动变为带版本号.
+
+### dsh 上游升级 (菜单「检查 dsh 更新」→「升级 dsh 到 vX.Y.Z」)
+- 版本来源: **运行时读** `node_modules/@deepseek-ai/dsh/package.json` (`shared::installed_dsh_version`);
+  `main.rs` 的 `DSH_VERSION` 降级为**出厂默认** (仅首次安装/重装用), 升级不再需要改常量+重建.
+- 检测: `curl https://registry.npmjs.org/@deepseek-ai/dsh/latest` (官方 registry, 不受内网 ~/.npmrc 影响).
+- 升级流程: 备份 (`data/backups/dsh`) → `npm install @deepseek-ai/dsh@<latest> --registry=官方`
+  (`bootstrap::npm_install_version`) → 重启 dsh web (`bootstrap::restart_dsh`) → 失败自动回滚 (`shared::restore_dsh`).
+- 门禁: npm 成功 + 进程启动 + 本地 HTTP 200 (server::launch 自带端口探测). 真实消息验证留人工回归.
+
+### DASH 自更新 (菜单「检查 DASH 更新」→「更新 DASH 到 vX.Y.Z」)
+- 检测: `curl https://api.github.com/repos/zzpwestlife/dashahan/releases/latest`
+  (**必须带 User-Agent 头**, 否则 GitHub API 403) → tag_name 去 v 前缀.
+- 下载: 按本地形态选 zip (`shared::has_embedded_node` 判 full/lite), GitHub releases 下载.
+- 替换: 备份当前 app 到 `~/DASH-backup/DASH-app-<ver>/` → 写辅助脚本 (等主进程退出 → rm+cp →
+  xattr 清隔离 → open; 失败恢复备份) → `app.exit(0)` 触发替换重启. 脚本用 raw string 存, 参数传路径.
+- 定位当前 app: `std::env::current_exe()` 向上三级 (Contents/MacOS/<bin> → .app).
+
+### 实现要点/坑
+- 版本比较用 **semver crate** (新增依赖), `shared::version_less`; 解析失败返回 false (宁可不提示不误升级).
+- 菜单动态文案: `menu::refresh_update_items` 用 `app.menu().get(id)` (返回 `MenuItemKind` 枚举, 需 match
+  取 `MenuItem` 变体) + `item.set_text(text)` (**tauri 2.11 的 set_text 只收 1 个参数, 不要传 app**).
+- **DSH 沙箱的 write 工具会把源码里的 `\"` 转义和 `${...}` 当模板处理** (写 Rust 字符串时 `\"` 会被吃掉,
+  写 shell 时 `${1:-x}` 会报错). 规避: 用 edit 修正 / 字符串避免 `\"` / shell 用 `$#` 短路代替 `${1:-}`.
 
 ## 1. 本机环境速查 (2026-08-14 实测)
 
