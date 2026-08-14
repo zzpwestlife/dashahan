@@ -23,13 +23,23 @@ jobs:
       - name: 安装依赖
         run: npm install
 
-      - name: 下载内嵌 Node (完整版)
-        run: ./scripts/fetch-node-dist.sh
+      - name: 构建轻量版 (arm64, 系统 Node)
+        run: npm run build -- --target aarch64-apple-darwin
+        env:
+          DASH_LITE: "1"
 
-      - name: 构建完整版 (arm64, 内嵌 Node)
-        run: npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin
+      - name: 保存轻量版产物
+        run: |
+          mkdir -p /tmp/dash-lite
+          cp -R src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app /tmp/dash-lite/
+          cp -R src-tauri/target/aarch64-apple-darwin/release/bundle/dmg /tmp/dash-lite/dmg 2>/dev/null || true
 
-      - name: 安装 app 并跑冒烟测试 (发版门禁)
+      - name: 下载内嵌 Node + 构建完整版 (arm64, 内嵌 Node)
+        run: |
+          ./scripts/fetch-node-dist.sh
+          npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin
+
+      - name: 安装完整版 app 并跑冒烟测试 (发版门禁)
         run: |
           APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app"
           rm -rf /Applications/DASH.app
@@ -37,25 +47,26 @@ jobs:
           xattr -dr com.apple.quarantine /Applications/DASH.app 2>/dev/null || true
           ./scripts/smoke-test.sh
 
-      - name: 打包 zip (app + 安装说明)
+      - name: 打包双版本 zip (app + 各自安装说明)
         run: |
-          mkdir -p dist-release
-          cp -R "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app" dist-release/
-          cp 安装说明.txt dist-release/
-          cd dist-release && zip -r -q ../DASH-macOS.zip DASH.app 安装说明.txt
+          mkdir -p dist-full dist-lite
+          # 完整版
+          cp -R "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app" dist-full/
+          cp 安装说明.txt dist-full/安装说明.txt
+          cd dist-full && zip -r -q ../DASH-macOS-full.zip DASH.app 安装说明.txt && cd ..
+          # 轻量版
+          cp -R "/tmp/dash-lite/DASH.app" dist-lite/
+          cp 安装说明-lite.txt dist-lite/安装说明.txt
+          cd dist-lite && zip -r -q ../DASH-macOS-lite.zip DASH.app 安装说明.txt && cd ..
 
-      - name: 创建 Release (挂 DMG + zip)
+      - name: 创建 Release (挂 DMG + 双版本 zip)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
-          if [ -n "$DMG" ]; then
-            gh release create "$VERSION" DASH-macOS.zip "$DMG" \
-              --title "DASH $VERSION" \
-              --notes "自动构建发布 (GitHub Actions). 内含 dsh 0.1.0-rc.6."
-          else
-            gh release create "$VERSION" DASH-macOS.zip \
-              --title "DASH $VERSION" \
-              --notes "自动构建发布 (GitHub Actions). 内含 dsh 0.1.0-rc.6."
-          fi
+          ASSETS="DASH-macOS-full.zip DASH-macOS-lite.zip"
+          [ -n "$DMG" ] && ASSETS="$ASSETS $DMG"
+          gh release create "$VERSION" $ASSETS \
+            --title "DASH $VERSION" \
+            --notes "自动构建发布 (GitHub Actions). 完整版(内嵌Node)+轻量版(需系统Node). 内含 dsh 0.1.0-rc.6."
