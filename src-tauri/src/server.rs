@@ -59,7 +59,11 @@ pub fn launch(app: &AppHandle) -> Result<String, String> {
                 .lock()
                 .map_err(|_| "state lock poisoned")?
                 .replace(child);
-            return Ok(format!("http://{addr}/"));
+            let url = format!("http://{addr}/");
+            if let Ok(mut u) = app.state::<AppState>().dsh_url.lock() {
+                *u = Some(url.clone());
+            }
+            return Ok(url);
         }
         if let Ok(Some(code)) = child.try_wait() {
             return Err(format!("dsh 提前退出 ({code}).\n{}", tail_log(&log_path)));

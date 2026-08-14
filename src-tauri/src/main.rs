@@ -11,12 +11,31 @@ mod state;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, RunEvent};
+use tauri::webview::PageLoadEvent;
+use tauri::{Listener, Manager, RunEvent};
 
 pub const DSH_PACKAGE: &str = "@deepseek-ai/dsh";
 pub const DSH_VERSION: &str = "0.1.0-rc.6";
 
 const TRAY_TOGGLE: &str = "tray-toggle";
+
+/// 页面加载完成后注入的自愈探针: 轮询检测 dsh 客户端是否报 "Failed to load plugins"
+/// (WKWebView 缓存了损坏的客户端状态时会出现), 检测到则通知壳层清缓存重载.
+const HEAL_PROBE_JS: &str = r#"(function () {
+  if (window.__dash_heal_probe) return;
+  window.__dash_heal_probe = true;
+  let n = 0;
+  const t = setInterval(() => {
+    n++;
+    const body = document.body ? document.body.innerText : '';
+    if (body.includes('Failed to load plugins')) {
+      clearInterval(t);
+      window.__TAURI__.event.emit('dash:plugin-failed', {});
+    } else if (n > 60) {
+      clearInterval(t); // 2 分钟无异常, 停止探测
+    }
+  }, 2000);
+})();"#;
 
 fn main() {
     tauri::Builder::default()
@@ -29,9 +48,29 @@ fn main() {
             }
         }))
         .manage(state::AppState::default())
+        .on_page_load(|window, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                let _ = window.eval(HEAL_PROBE_JS);
+            }
+        })
         .setup(|app| {
             menu::install(app)?;
             install_tray(app)?;
+            // 监听自愈探针: dsh 客户端插件加载失败 -> 清浏览数据 + 重载 (最多一次)
+            let handle = app.handle().clone();
+            app.listen("dash:plugin-failed", move |_| {
+                let st = handle.state::<state::AppState>();
+                if !st.try_heal() {
+                    return; // 已自愈过一次, 忽略 (防死循环)
+                }
+                if let Some(w) = handle.get_webview_window("main") {
+                    let _ = w.clear_all_browsing_data();
+                    let url = st.dsh_url.lock().ok().and_then(|u| u.clone());
+                    if let Some(u) = url {
+                        let _ = w.navigate(u.parse().expect("valid url"));
+                    }
+                }
+            });
             bootstrap::start(app.handle().clone());
             Ok(())
         })
