@@ -43,7 +43,8 @@ jobs:
       - name: 下载内嵌 Node + 构建完整版 (arm64, 内嵌 Node)
         run: |
           ./scripts/fetch-node-dist.sh
-          npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin --bundles app,dmg
+          # --config 路径相对工作目录 (仓库根), 必须带 src-tauri/ 前缀
+          npm run build -- --config src-tauri/tauri.full.conf.json --target aarch64-apple-darwin --bundles app,dmg
 
       - name: 安装完整版 app 并跑冒烟测试 (发版门禁)
         run: |
