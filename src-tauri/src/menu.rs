@@ -17,7 +17,22 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;
     let sub = Submenu::with_items(app, "大傻憨", true, &[&update, &apikey, &logs, &quit])?;
-    let menu = Menu::with_items(app, &[&sub])?;
+    // 标准「编辑」菜单: 注册 ⌘C/⌘V/⌘X 等快捷键到响应链, 否则 WebView 输入框无法复制/粘贴
+    let edit = Submenu::with_items(
+        app,
+        "编辑",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some("撤销"))?,
+            &PredefinedMenuItem::redo(app, Some("重做"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, Some("剪切"))?,
+            &PredefinedMenuItem::copy(app, Some("复制"))?,
+            &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+            &PredefinedMenuItem::select_all(app, Some("全选"))?,
+        ],
+    )?;
+    let menu = Menu::with_items(app, &[&sub, &edit])?;
     app.set_menu(menu)?;
 
     app.on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
