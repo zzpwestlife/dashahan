@@ -11,28 +11,25 @@ mod state;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::webview::PageLoadEvent;
-use tauri::{Listener, Manager, RunEvent};
+use tauri::{Manager, RunEvent};
 
 pub const DSH_PACKAGE: &str = "@deepseek-ai/dsh";
 pub const DSH_VERSION: &str = "0.1.0-rc.6";
 
 const TRAY_TOGGLE: &str = "tray-toggle";
 
-/// 页面加载完成后注入的自愈探针: 轮询检测 dsh 客户端是否报 "Failed to load plugins"
-/// (WKWebView 缓存了损坏的客户端状态时会出现), 检测到则通知壳层清缓存重载.
+/// 自愈探针 (纯 JS, 零依赖): 轮询检测 dsh 客户端是否报 "Failed to load plugins"
+/// (WKWebView 缓存了损坏的客户端状态时会出现). 检测到则把页面导航到 /__dash_heal__,
+/// 壳层 watchdog 轮询到该 URL 后清浏览数据并重载.
+/// 幂等: 页面重载后 window 标志重置, 再次注入会自动重新武装.
 const HEAL_PROBE_JS: &str = r#"(function () {
   if (window.__dash_heal_probe) return;
   window.__dash_heal_probe = true;
-  let n = 0;
   const t = setInterval(() => {
-    n++;
     const body = document.body ? document.body.innerText : '';
     if (body.includes('Failed to load plugins')) {
       clearInterval(t);
-      window.__TAURI__.event.emit('dash:plugin-failed', {});
-    } else if (n > 60) {
-      clearInterval(t); // 2 分钟无异常, 停止探测
+      try { location.replace(location.origin + '/__dash_heal__'); } catch (e) {}
     }
   }, 2000);
 })();"#;
@@ -48,29 +45,10 @@ fn main() {
             }
         }))
         .manage(state::AppState::default())
-        .on_page_load(|window, payload| {
-            if payload.event() == PageLoadEvent::Finished {
-                let _ = window.eval(HEAL_PROBE_JS);
-            }
-        })
         .setup(|app| {
             menu::install(app)?;
             install_tray(app)?;
-            // 监听自愈探针: dsh 客户端插件加载失败 -> 清浏览数据 + 重载 (最多一次)
-            let handle = app.handle().clone();
-            app.listen("dash:plugin-failed", move |_| {
-                let st = handle.state::<state::AppState>();
-                if !st.try_heal() {
-                    return; // 已自愈过一次, 忽略 (防死循环)
-                }
-                if let Some(w) = handle.get_webview_window("main") {
-                    let _ = w.clear_all_browsing_data();
-                    let url = st.dsh_url.lock().ok().and_then(|u| u.clone());
-                    if let Some(u) = url {
-                        let _ = w.navigate(u.parse().expect("valid url"));
-                    }
-                }
-            });
+            start_heal_watchdog(app.handle().clone());
             bootstrap::start(app.handle().clone());
             Ok(())
         })
@@ -130,4 +108,30 @@ fn toggle_window(app: &tauri::AppHandle) {
             let _ = w.set_focus();
         }
     }
+}
+
+/// 自愈看门狗: 后台线程每 3 秒 ① 注入幂等探针 (页面重载后自动重新武装),
+/// ② 检查页面 URL 是否出现自愈标记 (/__dash_heal__).
+/// 出现标记 = dsh 客户端插件加载失败 (缓存损坏), 则清浏览数据并重载 (最多 1 次, 防死循环).
+fn start_heal_watchdog(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let Some(w) = app.get_webview_window("main") else {
+            continue;
+        };
+        // 1) 武装探针 (幂等, 无论页面在哪个加载阶段都会被注入)
+        let _ = w.eval(HEAL_PROBE_JS);
+        // 2) 检查自愈标记
+        if let Ok(url) = w.url() {
+            if url.as_str().contains("/__dash_heal__") {
+                let st = app.state::<state::AppState>();
+                if st.try_heal() {
+                    let _ = w.clear_all_browsing_data();
+                    if let Some(u) = st.dsh_url.lock().ok().and_then(|u| u.clone()) {
+                        let _ = w.navigate(u.parse().expect("valid url"));
+                    }
+                }
+            }
+        }
+    });
 }

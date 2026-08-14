@@ -85,6 +85,10 @@ cd src-tauri && npx tauri build --config tauri.full.conf.json
 
 - 菜单「更新 dsh」安装的是**当前二进制锁定的版本** —— 升级依赖重新发布 app, 老用户需下载新版 (不会自动升级).
 
+## 排障 / Troubleshooting
+
+见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md). 最常见的 "Failed to load plugins"、粘贴失效、覆盖安装后配置「消失」、Gatekeeper 拦截都记在里面.
+
 ## 数据位置 / Data
 
 | 内容 | 路径 |
