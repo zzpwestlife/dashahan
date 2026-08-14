@@ -39,7 +39,7 @@ setup()
 | 组件 | 职责 |
 |---|---|
 | `connect(addr) -> io::Result<TcpStream>` | HTTP Upgrade 握手：`Connection: Upgrade` / `Upgrade: websocket` / `Sec-WebSocket-Version: 13` / 随机 Key；校验响应 `101` |
-| `read_text_frame(s) -> io::Result<Option<String>>` | 帧解析：FIN/opcode/长度（7/16/64bit）；1=文本→返回负载；8=Close→None（触发重连）；9=Ping→回 Pong；0=Continuation→拼接分片 |
+| `read_text_frame(s) -> io::Result<Option<String>>` | 帧解析：FIN/opcode/长度（7/16/64bit）；1=文本→返回负载；8=Close→None（触发重连）；9=Ping→回 Pong；0=Continuation→丢弃（**实现偏差**：分片消息整条丢弃，事件流为小 JSON 帧分片罕见，仅损失一条事件，换取无状态实现；spec 原定拼接，因需要跨调用缓冲状态而简化） |
 | `classify(raw: &str) -> Option<NotifyKind>` | serde_json 反序列化 `{method, payload}`，按 `payload.type` 匹配 |
 | `maybe_notify(app, kind)` | 判定（开关 && 窗口非前台 && 距上次 ≥10s）→ osascript |
 | `start_listener(app)` | 主循环 + 断连重连 + 日志（`logs/notify.log`） |

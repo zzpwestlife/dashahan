@@ -12,6 +12,13 @@ pub struct Config {
     /// 是否已询问过 API Key (避免每次启动都弹框); 真值只存钥匙串, config 不落盘明文.
     #[serde(default)]
     pub key_asked: bool,
+    /// 对话完成/权限请求系统通知开关 (默认开)
+    #[serde(default = "default_true")]
+    pub notify_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub fn data_dir(app: &AppHandle) -> PathBuf {

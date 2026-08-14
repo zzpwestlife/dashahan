@@ -5,6 +5,7 @@
 
 mod bootstrap;
 mod menu;
+mod notify;
 mod server;
 mod shared;
 mod state;
@@ -47,9 +48,14 @@ fn main() {
         }))
         .manage(state::AppState::default())
         .setup(|app| {
+            // 通知开关初始值从 config.json 恢复 (默认开)
+            app.state::<state::AppState>()
+                .notify_enabled
+                .store(shared::read_config(app.handle()).notify_enabled, std::sync::atomic::Ordering::SeqCst);
             menu::install(app)?;
             install_tray(app)?;
             start_heal_watchdog(app.handle().clone());
+            notify::start_listener(app.handle().clone());
             bootstrap::start(app.handle().clone());
             update::check_all_background(app.handle().clone());
             Ok(())

@@ -2,9 +2,9 @@
 // OUTPUT: shared killable state for the app
 // POS: src-tauri/src/state.rs
 use std::process::Child;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct AppState {
@@ -17,6 +17,10 @@ pub struct AppState {
     pub dsh_latest: Mutex<Option<String>>,
     /// 检测到的 DASH 最新版本 (有新版时才 Some)
     pub dash_latest: Mutex<Option<String>>,
+    /// 对话完成/权限请求系统通知开关 (菜单可切换; 真值持久化在 config.json)
+    pub notify_enabled: AtomicBool,
+    /// 上次发通知的时间 (10s 防抖; None = 从未发过)
+    pub last_notify: Mutex<Option<Instant>>,
 }
 
 impl AppState {

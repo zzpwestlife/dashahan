@@ -12,6 +12,7 @@ const ID_UPDATE: &str = "update-dsh";
 const ID_DSH_UPDATE: &str = "check-dsh-update";
 const ID_DASH_UPDATE: &str = "check-dash-update";
 const ID_APIKEY: &str = "set-api-key";
+const ID_NOTIFY: &str = "notify-toggle";
 const ID_LOGS: &str = "open-logs";
 
 pub fn install(app: &App) -> tauri::Result<()> {
@@ -19,13 +20,22 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let dsh_update = MenuItem::with_id(app, ID_DSH_UPDATE, "检查 dsh 更新", true, None::<&str>)?;
     let dash_update = MenuItem::with_id(app, ID_DASH_UPDATE, "检查 DASH 更新", true, None::<&str>)?;
     let apikey = MenuItem::with_id(app, ID_APIKEY, "设置 API Key", true, None::<&str>)?;
+    let notify_checked = shared::read_config(app.handle()).notify_enabled;
+    let notify = tauri::menu::CheckMenuItem::with_id(
+        app,
+        ID_NOTIFY,
+        "对话完成通知",
+        true,
+        notify_checked,
+        None::<&str>,
+    )?;
     let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;
     let sub = Submenu::with_items(
         app,
         "大傻憨",
         true,
-        &[&update, &dsh_update, &dash_update, &apikey, &logs, &quit],
+        &[&update, &dsh_update, &dash_update, &apikey, &notify, &logs, &quit],
     )?;
     // 标准「编辑」菜单: 注册 ⌘C/⌘V/⌘X 等快捷键到响应链, 否则 WebView 输入框无法复制/粘贴
     let edit = Submenu::with_items(
@@ -50,10 +60,26 @@ pub fn install(app: &App) -> tauri::Result<()> {
         ID_DSH_UPDATE => handle_dsh_update(app.clone()),
         ID_DASH_UPDATE => handle_dash_update(app.clone()),
         ID_APIKEY => prompt_and_set_key(app.clone()),
+        ID_NOTIFY => toggle_notify(app.clone()),
         ID_LOGS => open_logs(app),
         _ => {}
     });
     Ok(())
+}
+
+/// 菜单「对话完成通知」勾选切换: 更新运行时开关 + 持久化 config.json + 同步勾选态.
+fn toggle_notify(app: AppHandle) {
+    let st = app.state::<AppState>();
+    let enabled = !st.notify_enabled.load(std::sync::atomic::Ordering::SeqCst);
+    st.notify_enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
+    let mut cfg = shared::read_config(&app);
+    cfg.notify_enabled = enabled;
+    let _ = shared::write_config(&app, &cfg);
+    if let Some(menu) = app.menu() {
+        if let Some(tauri::menu::MenuItemKind::Check(item)) = menu.get(ID_NOTIFY) {
+            let _ = item.set_checked(enabled);
+        }
+    }
 }
 
 /// 刷新两个更新菜单项文案: 发现新版显示"升级/更新到 vX", 否则"检查…".
