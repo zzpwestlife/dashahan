@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装 arm64 编译目标
+        run: rustup target add aarch64-apple-darwin
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 构建 (arm64)
+        run: npm run build -- --target aarch64-apple-darwin
+
+      - name: 安装 app 并跑冒烟测试 (发版门禁)
+        run: |
+          APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app"
+          rm -rf /Applications/DASH.app
+          cp -R "$APP" /Applications/
+          xattr -dr com.apple.quarantine /Applications/DASH.app 2>/dev/null || true
+          ./scripts/smoke-test.sh
+
+      - name: 打包 zip (app + 安装说明)
+        run: |
+          mkdir -p dist-release
+          cp -R "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DASH.app" dist-release/
+          cp 安装说明.txt dist-release/
+          cd dist-release && zip -r -q ../DASH-macOS.zip DASH.app 安装说明.txt
+
+      - name: 创建 Release (挂 DMG + zip)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
+          if [ -n "$DMG" ]; then
+            gh release create "$VERSION" DASH-macOS.zip "$DMG" \
+              --title "DASH $VERSION" \
+              --notes "自动构建发布 (GitHub Actions). 内含 dsh 0.1.0-rc.6."
+          else
+            gh release create "$VERSION" DASH-macOS.zip \
+              --title "DASH $VERSION" \
+              --notes "自动构建发布 (GitHub Actions). 内含 dsh 0.1.0-rc.6."
+          fi
