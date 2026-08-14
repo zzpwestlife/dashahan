@@ -96,8 +96,11 @@ pub fn dsh_installed(app: &AppHandle) -> bool {
 
 /// 用 macOS 原生对话框收集 API Key (hidden answer, 支持系统级 ⌘V 粘贴).
 /// 返回 Some(key) 表示用户点"保存"并输入了内容; None 表示取消或失败.
-pub fn prompt_api_key() -> Option<String> {
-    let script = "display dialog \"请输入 DeepSeek API Key（可直接 ⌘V 粘贴）：\" default answer \"\" with hidden answer buttons {\"取消\",\"保存\"} default button \"保存\"";
+pub fn prompt_api_key(message: &str) -> Option<String> {
+    let script = format!(
+        "display dialog \"{}\" default answer \"\" with hidden answer buttons {{\"取消\",\"保存\"}} default button \"保存\"",
+        message
+    );
     let out = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)

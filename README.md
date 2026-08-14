@@ -27,8 +27,8 @@ Double-click macOS app wrapping deepseek-harness (`dsh web`). No `npx` commands 
 接收方首次打开 (一次性, 约 5 分钟):
 1. 未签名提示: Finder 中 **右键 DASH.app → 打开** → 再点"打开" (或 `xattr -d com.apple.quarantine /Applications/DASH.app`).
 2. 首次启动自动下载 dsh (需联网, 约 2 分钟), 之后跳过.
-3. 弹出系统对话框 → 粘贴自己的 **DeepSeek API Key** → 保存.
-4. 之后双击秒开.
+3. 可能弹出 API Key 对话框 — **可选**: 粘贴 DeepSeek API Key 点"保存", 或直接点"取消"都会继续.
+4. 之后双击秒开. 未设 key 时, 随时可在 dsh 的设置页或菜单「设置 API Key」中添加.
 
 ## 从源码构建 / Build from source
 

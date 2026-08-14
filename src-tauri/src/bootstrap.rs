@@ -38,26 +38,23 @@ async fn flow(app: AppHandle) {
 
     let cfg = shared::read_config(&app);
     if cfg.api_key.is_none() && !cfg.key_asked {
-        shared::progress(&app, "请输入 API Key…");
-        // 用 macOS 原生对话框收集 key (spawn_blocking 不阻塞 async runtime)
-        let key = tauri::async_runtime::spawn_blocking(|| shared::prompt_api_key())
-            .await
-            .ok()
-            .flatten();
-        match key {
-            Some(k) => {
-                let mut c = shared::read_config(&app);
-                c.api_key = Some(k);
-                c.key_asked = true;
-                let _ = shared::write_config(&app, &c);
-            }
-            None => {
-                let mut c = shared::read_config(&app);
-                c.key_asked = true;
-                let _ = shared::write_config(&app, &c);
-                shared::boot_error(&app, "未输入 API Key. 可通过菜单「设置 API Key」稍后填写.");
-                return;
-            }
+        shared::progress(&app, "请输入 API Key（可跳过）…");
+        // 原生对话框收集 key (可选): 弹一次, 取消不阻塞, 之后可在 dsh 设置页或菜单添加
+        let key = tauri::async_runtime::spawn_blocking(|| {
+            shared::prompt_api_key("请输入 DeepSeek API Key（可选，可稍后在 dsh 设置中添加）")
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(k) = key {
+            let mut c = shared::read_config(&app);
+            c.api_key = Some(k);
+            c.key_asked = true;
+            let _ = shared::write_config(&app, &c);
+        } else {
+            let mut c = shared::read_config(&app);
+            c.key_asked = true;
+            let _ = shared::write_config(&app, &c);
         }
     }
 

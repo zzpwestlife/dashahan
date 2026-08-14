@@ -32,7 +32,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
 /// 菜单「设置 API Key」: 弹出 macOS 原生对话框收集 key, 不阻塞主线程.
 fn prompt_and_set_key(app: AppHandle) {
     std::thread::spawn(move || {
-        if let Some(key) = shared::prompt_api_key() {
+        if let Some(key) = shared::prompt_api_key("请输入 DeepSeek API Key（可稍后在 dsh 设置中添加）") {
             let mut cfg = shared::read_config(&app);
             cfg.api_key = Some(key);
             cfg.key_asked = true;
