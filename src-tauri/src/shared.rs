@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -24,12 +24,66 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
-pub fn resource_node(app: &AppHandle) -> PathBuf {
-    app.path().resource_dir().expect("resource_dir missing").join("node")
+/// 查找系统 Node.js: 先 PATH, 再常见安装位置 (Finder 启动时 PATH 不完整).
+/// 优先返回"带 npm"的 node (Homebrew 新版 node 公式已不含 npm, 需跳过);
+/// 若所有候选都不带 npm, 回退到第一个可用的 node (供 dsh web 运行).
+pub fn find_node() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join("node"));
+        }
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin/node"));
+    candidates.push(PathBuf::from("/usr/local/bin/node"));
+    if let Some(home) = std::env::var_os("HOME") {
+        let nvm = Path::new(&home).join(".nvm/versions/node");
+        if let Ok(rd) = fs::read_dir(&nvm) {
+            for e in rd.flatten() {
+                candidates.push(e.path().join("bin/node"));
+            }
+        }
+        let mise = Path::new(&home).join(".local/share/mise/installs/node");
+        if let Ok(rd) = fs::read_dir(&mise) {
+            for e in rd.flatten() {
+                candidates.push(e.path().join("bin/node"));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut fallback: Option<PathBuf> = None;
+    for c in candidates {
+        if !c.is_file() {
+            continue;
+        }
+        if seen.insert(c.clone()) {
+            if npm_cli(&c).is_some() {
+                return Some(c);
+            }
+            if fallback.is_none() {
+                fallback = Some(c);
+            }
+        }
+    }
+    fallback
 }
 
-pub fn npm_cli(app: &AppHandle) -> PathBuf {
-    app.path().resource_dir().expect("resource_dir missing").join("npm/bin/npm-cli.js")
+/// npm CLI 入口 (node <npm-cli.js>), 兼容 homebrew/nvm/官方 tarball 布局.
+pub fn npm_cli(node: &Path) -> Option<PathBuf> {
+    let real = fs::canonicalize(node).unwrap_or_else(|_| node.to_path_buf());
+    let dir = real.parent()?;
+    let rels = [
+        "../lib/node_modules/npm/bin/npm-cli.js",
+        "../../lib/node_modules/npm/bin/npm-cli.js",
+        "../../../lib/node_modules/npm/bin/npm-cli.js",
+    ];
+    for rel in rels {
+        let p = dir.join(rel);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 pub fn dsh_bin(app: &AppHandle) -> PathBuf {
@@ -40,11 +94,50 @@ pub fn dsh_installed(app: &AppHandle) -> bool {
     dsh_bin(app).is_file()
 }
 
+/// 用 macOS 原生对话框收集 API Key (hidden answer, 支持系统级 ⌘V 粘贴).
+/// 返回 Some(key) 表示用户点"保存"并输入了内容; None 表示取消或失败.
+pub fn prompt_api_key() -> Option<String> {
+    let script = "display dialog \"请输入 DeepSeek API Key（可直接 ⌘V 粘贴）：\" default answer \"\" with hidden answer buttons {\"取消\",\"保存\"} default button \"保存\"";
+    let out = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .ok()?;
+    // 用户点"取消"时 osascript 退出码非零
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    // 输出形如: button returned:保存, text returned:sk-xxxx[, gave up:true]
+    let needle = "text returned:";
+    let idx = text.find(needle)?;
+    let rest = &text[idx + needle.len()..];
+    // 值到下一个 ", " 或行尾结束
+    let end = rest.find(", ").unwrap_or(rest.len());
+    let val = rest[..end].trim();
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    }
+}
+
 pub fn path_env(app: &AppHandle) -> String {
-    let res = app.path().resource_dir().expect("resource_dir missing");
-    let bin = data_dir(app).join("node_modules/.bin");
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(node) = find_node() {
+        if let Some(d) = node.parent() {
+            dirs.push(d.to_path_buf());
+        }
+    }
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs.push(data_dir(app).join("node_modules/.bin"));
     let old = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{}:{}", res.display(), bin.display(), old)
+    dirs.into_iter()
+        .map(|d| d.to_string_lossy().to_string())
+        .chain(std::iter::once(old))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 pub fn read_config(app: &AppHandle) -> Config {

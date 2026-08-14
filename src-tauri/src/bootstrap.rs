@@ -6,7 +6,7 @@ use crate::shared;
 use crate::state::AppState;
 use std::fs::OpenOptions;
 use std::process::{Command, Stdio};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -38,8 +38,27 @@ async fn flow(app: AppHandle) {
 
     let cfg = shared::read_config(&app);
     if cfg.api_key.is_none() && !cfg.key_asked {
-        let _ = app.emit("show-api-key", ());
-        return;
+        shared::progress(&app, "请输入 API Key…");
+        // 用 macOS 原生对话框收集 key (spawn_blocking 不阻塞 async runtime)
+        let key = tauri::async_runtime::spawn_blocking(|| shared::prompt_api_key())
+            .await
+            .ok()
+            .flatten();
+        match key {
+            Some(k) => {
+                let mut c = shared::read_config(&app);
+                c.api_key = Some(k);
+                c.key_asked = true;
+                let _ = shared::write_config(&app, &c);
+            }
+            None => {
+                let mut c = shared::read_config(&app);
+                c.key_asked = true;
+                let _ = shared::write_config(&app, &c);
+                shared::boot_error(&app, "未输入 API Key. 可通过菜单「设置 API Key」稍后填写.");
+                return;
+            }
+        }
     }
 
     shared::progress(&app, "正在启动本地服务…");
@@ -56,6 +75,10 @@ async fn flow(app: AppHandle) {
 }
 
 pub fn npm_install(app: &AppHandle) -> Result<(), String> {
+    let node = shared::find_node()
+        .ok_or("未检测到 Node.js. 请先安装 Node.js (https://nodejs.org) 后再试.")?;
+    let npm_cli = shared::npm_cli(&node)
+        .ok_or("找到 Node.js 但未找到 npm, 请确认 Node 安装完整.")?;
     let data = shared::data_dir(app);
     let log_path = data.join("logs/npm.log");
     let log = OpenOptions::new()
@@ -65,8 +88,8 @@ pub fn npm_install(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let log_err = log.try_clone().map_err(|e| e.to_string())?;
 
-    let status = Command::new(shared::resource_node(app))
-        .arg(shared::npm_cli(app))
+    let status = Command::new(&node)
+        .arg(&npm_cli)
         .args([
             "install",
             "--prefix",
@@ -96,22 +119,5 @@ pub fn npm_install(app: &AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn retry_boot(app: AppHandle) {
-    start(app);
-}
-
-#[tauri::command]
-pub fn set_api_key(app: AppHandle, key: String) {
-    let mut cfg = shared::read_config(&app);
-    cfg.api_key = if key.is_empty() { None } else { Some(key) };
-    cfg.key_asked = true;
-    let _ = shared::write_config(&app, &cfg);
-    start(app);
-}
-
-#[tauri::command]
-pub fn skip_api_key(app: AppHandle) {
-    let mut cfg = shared::read_config(&app);
-    cfg.key_asked = true;
-    let _ = shared::write_config(&app, &cfg);
     start(app);
 }

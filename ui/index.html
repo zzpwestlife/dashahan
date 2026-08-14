@@ -16,7 +16,6 @@
       font-family: -apple-system, "PingFang SC", sans-serif;
       background: #0f1115;
       color: #e6e8ec;
-      user-select: none;
     }
     .logo { font-size: 72px; }
     h1 { font-size: 22px; font-weight: 600; }
@@ -24,12 +23,8 @@
     .bar { width: 260px; height: 4px; border-radius: 2px; background: #24272e; overflow: hidden; }
     .bar > div { width: 40%; height: 100%; background: #4f8cff; border-radius: 2px; animation: slide 1.2s ease-in-out infinite; }
     @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
-    #retry, #saveKey, #skipKey { display: none; padding: 8px 22px; border: 0; border-radius: 8px; background: #4f8cff; color: #fff; font-size: 14px; cursor: pointer; }
-    #retry:hover, #saveKey:hover { background: #3b74e0; }
-    #skipKey { background: #2a2d34; }
-    #skipKey:hover { background: #33373f; }
-    #keyPanel { display: none; flex-direction: column; align-items: center; gap: 12px; }
-    #keyInput { width: 320px; padding: 8px 12px; border-radius: 8px; border: 1px solid #33363e; background: #171a20; color: #e6e8ec; font-size: 14px; outline: none; }
+    #retry { display: none; padding: 8px 22px; border: 0; border-radius: 8px; background: #4f8cff; color: #fff; font-size: 14px; cursor: pointer; }
+    #retry:hover { background: #3b74e0; }
   </style>
 </head>
 <body>
@@ -38,11 +33,6 @@
   <div id="barBox" class="bar"><div></div></div>
   <div id="status">正在启动…</div>
   <button id="retry">重试</button>
-  <div id="keyPanel">
-    <input id="keyInput" type="password" placeholder="DeepSeek API Key" />
-    <button id="saveKey">保存并继续</button>
-    <button id="skipKey">跳过</button>
-  </div>
 
   <script>
     const { listen } = window.__TAURI__.event;
@@ -51,7 +41,6 @@
     const status = document.getElementById("status");
     const barBox = document.getElementById("barBox");
     const retry = document.getElementById("retry");
-    const keyPanel = document.getElementById("keyPanel");
 
     listen("boot-progress", (e) => { status.textContent = e.payload.message; });
 
@@ -61,35 +50,11 @@
       retry.style.display = "block";
     });
 
-    listen("show-api-key", () => {
-      status.textContent = "可在下方填写 DeepSeek API Key, 或跳过稍后再设";
-      barBox.style.display = "none";
-      keyPanel.style.display = "flex";
-      document.getElementById("saveKey").style.display = "block";
-      document.getElementById("skipKey").style.display = "block";
-    });
-
     retry.addEventListener("click", () => {
       retry.style.display = "none";
       barBox.style.display = "block";
       status.textContent = "正在重试…";
       invoke("retry_boot");
-    });
-
-    document.getElementById("saveKey").addEventListener("click", () => {
-      const key = document.getElementById("keyInput").value.trim();
-      if (!key) return;
-      keyPanel.style.display = "none";
-      barBox.style.display = "block";
-      status.textContent = "已保存, 正在启动…";
-      invoke("set_api_key", { key });
-    });
-
-    document.getElementById("skipKey").addEventListener("click", () => {
-      keyPanel.style.display = "none";
-      barBox.style.display = "block";
-      status.textContent = "正在启动…";
-      invoke("skip_api_key");
     });
   </script>
 </body>

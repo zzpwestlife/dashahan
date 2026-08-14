@@ -5,7 +5,7 @@ use crate::bootstrap;
 use crate::shared;
 use crate::state::AppState;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{App, AppHandle, Emitter, Manager};
+use tauri::{App, AppHandle, Manager};
 
 const ID_UPDATE: &str = "update-dsh";
 const ID_APIKEY: &str = "set-api-key";
@@ -22,22 +22,29 @@ pub fn install(app: &App) -> tauri::Result<()> {
 
     app.on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
         ID_UPDATE => bootstrap::install_then_start(app.clone()),
-        ID_APIKEY => show_key_panel(app.clone()),
+        ID_APIKEY => prompt_and_set_key(app.clone()),
         ID_LOGS => open_logs(app),
         _ => {}
     });
     Ok(())
 }
 
-fn show_key_panel(app: AppHandle) {
-    let mut cfg = shared::read_config(&app);
-    cfg.key_asked = false;
-    let _ = shared::write_config(&app, &cfg);
-    app.state::<AppState>().kill_child();
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.navigate("tauri://localhost/index.html".parse().expect("boot url"));
-        let _ = w.emit("show-api-key", ());
-    }
+/// 菜单「设置 API Key」: 弹出 macOS 原生对话框收集 key, 不阻塞主线程.
+fn prompt_and_set_key(app: AppHandle) {
+    std::thread::spawn(move || {
+        if let Some(key) = shared::prompt_api_key() {
+            let mut cfg = shared::read_config(&app);
+            cfg.api_key = Some(key);
+            cfg.key_asked = true;
+            let _ = shared::write_config(&app, &cfg);
+            app.state::<AppState>().kill_child();
+            if let Some(w) = app.get_webview_window("main") {
+                // 回到启动页, 由 flow 重新驱动
+                let _ = w.navigate("tauri://localhost/index.html".parse().expect("boot url"));
+            }
+            bootstrap::start(app);
+        }
+    });
 }
 
 fn open_logs(app: &AppHandle) {

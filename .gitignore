@@ -5,3 +5,5 @@ src-tauri/resources/
 src-tauri/gen/
 icon-src/
 .DS_Store
+dist/
+.workbuddy/

@@ -34,9 +34,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            bootstrap::retry_boot,
-            bootstrap::set_api_key,
-            bootstrap::skip_api_key
+            bootstrap::retry_boot
         ])
         .build(tauri::generate_context!())
         .expect("大傻憨 build failed")
