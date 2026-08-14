@@ -61,7 +61,8 @@ cd src-tauri && npx tauri build --config tauri.full.conf.json
 
 ## 排障
 
-见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+- 使用问题见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+- 开发/CI 运维问题 (push、构建、发版) 见 [DEV-NOTES.md](DEV-NOTES.md).
 
 ## 数据位置
 
