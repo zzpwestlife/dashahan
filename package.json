@@ -1,6 +1,6 @@
 {
   "name": "dashahan",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "大傻憨: double-click macOS wrapper for deepseek-harness (dsh web)",
   "scripts": {
