@@ -438,6 +438,26 @@ pub fn has_embedded_node(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// macOS 系统通知 (通知中心横幅; 零依赖, 无需权限申请).
+pub fn notify(title: &str, message: &str) {
+    let script = format!(r#"display notification "{message}" with title "{title}""#);
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output();
+}
+
+/// macOS 原生结果对话框 (模态, 用户必见; 升级完成/失败反馈).
+pub fn alert(title: &str, message: &str) {
+    let script = format!(
+        r#"display alert "{title}" message "{message}" buttons {{"确定"}} default button "确定""#
+    );
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output();
+}
+
 /// macOS 原生确认对话框; 返回 true 表示用户点了"确定".
 pub fn confirm(message: &str) -> bool {
     let script = format!(

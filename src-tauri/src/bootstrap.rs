@@ -143,16 +143,37 @@ pub fn npm_install_version(app: &AppHandle, pkg: &str, version: &str) -> Result<
     }
 }
 
-/// 重启 dsh web: 杀残留 -> 启动 -> 导航窗口 (升级/回滚后复用).
+/// 重启 dsh web: 杀残留 -> 启动 -> HTTP 200 门禁 -> 导航窗口 (升级/回滚后复用).
 pub fn restart_dsh(app: &AppHandle) -> Result<String, String> {
     app.state::<AppState>().kill_child();
     let url = server::launch(app)?;
+    // 升级路径门禁: TCP 端口通不代表 HTTP 就绪, 必须确认页面可访问
+    if !http_ready(&url) {
+        return Err(format!("服务端口已开但 HTTP 未就绪: {url}"));
+    }
     if let Some(w) = app.get_webview_window("main") {
         if let Err(e) = w.navigate(url.parse().expect("valid url")) {
             shared::boot_error(app, &format!("页面加载失败: {e}"));
         }
     }
     Ok(url)
+}
+
+/// 轮询等待本地 HTTP 返回 200 (最多 15s).
+fn http_ready(url: &str) -> bool {
+    for _ in 0..15 {
+        if let Ok(out) = Command::new("curl")
+            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3"])
+            .arg(url)
+            .output()
+        {
+            if out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "200" {
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    false
 }
 
 #[tauri::command]

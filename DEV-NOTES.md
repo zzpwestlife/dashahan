@@ -23,6 +23,12 @@
   xattr 清隔离 → open; 失败恢复备份) → `app.exit(0)` 触发替换重启. 脚本用 raw string 存, 参数传路径.
 - 定位当前 app: `std::env::current_exe()` 向上三级 (Contents/MacOS/<bin> → .app).
 
+### 通知与反馈 (v0.1.7 补全)
+- 发现新版: 后台检查线程弹 **macOS 系统通知** (`shared::notify`, osascript `display notification`, 零依赖无需权限) + 菜单文案变化.
+- 升级过程/结果: 开始时 notify; 完成/失败弹**模态对话框** (`shared::alert`, osascript `display alert`) —— 即使 dsh 正在运行(窗口显示 dsh UI)用户也能看到结果, 不依赖启动页.
+- dsh 升级门禁增强: `bootstrap::restart_dsh` 在 TCP 探测后**轮询 HTTP 200 最多 15s** (`http_ready`), 未就绪视为升级失败触发回滚.
+- DASH 替换后验证: 辅助脚本 `open` 新 app 后 **pgrep 验证进程起来 (最多 15s)**, 失败恢复备份 + osascript 通知. 注意脚本里 osascript 用单引号包裹避免引号嵌套问题.
+
 ### 实现要点/坑
 - 版本比较用 **semver crate** (新增依赖), `shared::version_less`; 解析失败返回 false (宁可不提示不误升级).
 - 菜单动态文案: `menu::refresh_update_items` 用 `app.menu().get(id)` (返回 `MenuItemKind` 枚举, 需 match

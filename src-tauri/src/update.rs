@@ -37,11 +37,13 @@ pub fn check_all_background(app: AppHandle) {
     std::thread::spawn(move || {
         let mut changed = false;
         if let Some(v) = check_dsh(&app) {
-            *app.state::<AppState>().dsh_latest.lock().unwrap_or_else(|p| p.into_inner()) = Some(v);
+            *app.state::<AppState>().dsh_latest.lock().unwrap_or_else(|p| p.into_inner()) = Some(v.clone());
+            shared::notify("dsh 有新版本", &format!("v{v} 可用, 点菜单「升级 dsh」一键升级"));
             changed = true;
         }
         if let Some(v) = check_dash(&app) {
-            *app.state::<AppState>().dash_latest.lock().unwrap_or_else(|p| p.into_inner()) = Some(v);
+            *app.state::<AppState>().dash_latest.lock().unwrap_or_else(|p| p.into_inner()) = Some(v.clone());
+            shared::notify("DASH 有新版本", &format!("v{v} 可用, 点菜单「更新 DASH」一键更新"));
             changed = true;
         }
         if changed {
@@ -58,9 +60,10 @@ pub fn upgrade_dsh(app: &AppHandle) -> Result<String, String> {
     if installed == latest {
         return Ok(format!("dsh 已是最新版本 v{latest}"));
     }
+    shared::notify("正在升级 dsh", &format!("{installed} → v{latest}, 约 1~3 分钟"));
     shared::progress(app, &format!("正在升级 dsh {installed} → {latest}…"));
     shared::backup_dsh(app)?;
-    match bootstrap::npm_install_version(app, crate::DSH_PACKAGE, &latest) {
+    let result = match bootstrap::npm_install_version(app, crate::DSH_PACKAGE, &latest) {
         Ok(()) => match bootstrap::restart_dsh(app) {
             Ok(_) => {
                 // 已是最新, 清缓存状态
@@ -78,7 +81,18 @@ pub fn upgrade_dsh(app: &AppHandle) -> Result<String, String> {
             let _ = shared::restore_dsh(app);
             Err(format!("安装失败, 已自动回滚: {e}"))
         }
+    };
+    match &result {
+        Ok(msg) => {
+            shared::notify("dsh 升级完成", msg);
+            shared::alert("dsh 升级完成", msg);
+        }
+        Err(e) => {
+            shared::notify("dsh 升级失败", e);
+            shared::alert("dsh 升级失败", e);
+        }
     }
+    result
 }
 
 /// 一键更新 DASH: 下载对应 zip -> 解压 -> 备份当前 app -> 脚本替换并重启.
@@ -103,6 +117,7 @@ pub fn update_dash(app: &AppHandle) -> Result<String, String> {
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let zip_path = tmp.join(zip_name);
 
+    shared::notify("DASH 更新", &format!("正在下载 v{latest} ({zip_name})…"));
     shared::progress(app, &format!("正在下载 DASH v{latest} ({zip_name})…"));
     download(&url, &zip_path)?;
 
@@ -143,24 +158,40 @@ pub fn update_dash(app: &AppHandle) -> Result<String, String> {
         return Err(format!("备份当前 app 失败 (cp 退出码 {:?})", st.code()));
     }
 
-    // 辅助安装脚本: 等主进程退出 -> 替换 -> 清隔离 -> 重开; 失败恢复备份
+    // 辅助安装脚本: 等主进程退出 -> 替换 -> 清隔离 -> 重开;
+    // 验证新 app 进程确实起来 (最多 15s), 失败恢复备份 + 系统通知.
     let script_path = tmp.join("install.sh");
     let script = r#"#!/bin/bash
 sleep 3
 APP="$1"; NEW="$2"; BAK="$3"
+notify_fail() {
+  osascript -e 'display notification "DASH 更新失败, 已自动恢复原版本" with title "DASH"' >/dev/null 2>&1
+}
+restore() {
+  rm -rf "$APP"
+  [ -d "$BAK" ] && cp -R "$BAK" "$APP"
+  open "$APP" 2>/dev/null
+  notify_fail
+}
 if [ -d "$NEW" ]; then
   rm -rf "$APP"
   cp -R "$NEW" "$APP"
   xattr -dr com.apple.quarantine "$APP" 2>/dev/null
-  open "$APP" || { rm -rf "$APP"; [ -d "$BAK" ] && cp -R "$BAK" "$APP"; open "$APP" 2>/dev/null; }
+  open "$APP"
+  ok=0
+  for i in $(seq 1 15); do
+    if pgrep -f "$APP/Contents/MacOS/" >/dev/null 2>&1; then ok=1; break; fi
+    sleep 1
+  done
+  [ "$ok" = "1" ] || restore
 else
-  [ -d "$BAK" ] && cp -R "$BAK" "$APP" 2>/dev/null
-  open "$APP" 2>/dev/null
+  restore
 fi
 "#;
     std::fs::write(&script_path, script).map_err(|e| e.to_string())?;
     let _ = Command::new("chmod").arg("+x").arg(&script_path).status();
 
+    shared::notify("DASH 更新", &format!("v{latest} 已就绪, 正在重启…"));
     shared::progress(app, &format!("安装完成, 正在重启 DASH (v{latest})…"));
     let _ = Command::new(&script_path)
         .arg(cur_app)
