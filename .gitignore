@@ -1,0 +1,7 @@
+# --- INPUT: git status scan | OUTPUT: clean repo | POS: repo root ---
+node_modules/
+src-tauri/target/
+src-tauri/resources/
+src-tauri/gen/
+icon-src/
+.DS_Store

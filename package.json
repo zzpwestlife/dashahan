@@ -1,0 +1,14 @@
+{
+  "name": "dashahan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "大傻憨: double-click macOS wrapper for deepseek-harness (dsh web)",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

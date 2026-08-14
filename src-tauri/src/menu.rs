@@ -1,0 +1,46 @@
+// INPUT: user clicks native menu
+// OUTPUT: update / api-key / open-logs actions
+// POS: src-tauri/src/menu.rs
+use crate::bootstrap;
+use crate::shared;
+use crate::state::AppState;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{App, AppHandle, Emitter, Manager};
+
+const ID_UPDATE: &str = "update-dsh";
+const ID_APIKEY: &str = "set-api-key";
+const ID_LOGS: &str = "open-logs";
+
+pub fn install(app: &App) -> tauri::Result<()> {
+    let update = MenuItem::with_id(app, ID_UPDATE, "更新 dsh", true, None::<&str>)?;
+    let apikey = MenuItem::with_id(app, ID_APIKEY, "设置 API Key", true, None::<&str>)?;
+    let logs = MenuItem::with_id(app, ID_LOGS, "打开日志目录", true, None::<&str>)?;
+    let quit = PredefinedMenuItem::quit(app, Some("退出 大傻憨"))?;
+    let sub = Submenu::with_items(app, "大傻憨", true, &[&update, &apikey, &logs, &quit])?;
+    let menu = Menu::with_items(app, &[&sub])?;
+    app.set_menu(menu)?;
+
+    app.on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
+        ID_UPDATE => bootstrap::install_then_start(app.clone()),
+        ID_APIKEY => show_key_panel(app.clone()),
+        ID_LOGS => open_logs(app),
+        _ => {}
+    });
+    Ok(())
+}
+
+fn show_key_panel(app: AppHandle) {
+    let mut cfg = shared::read_config(&app);
+    cfg.key_asked = false;
+    let _ = shared::write_config(&app, &cfg);
+    app.state::<AppState>().kill_child();
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.navigate("tauri://localhost/index.html".parse().expect("boot url"));
+        let _ = w.emit("show-api-key", ());
+    }
+}
+
+fn open_logs(app: &AppHandle) {
+    let dir = shared::data_dir(app).join("logs");
+    let _ = std::process::Command::new("open").arg(dir).spawn();
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "大傻憨",
+  "version": "0.1.0",
+  "identifier": "com.solo.dashahan",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "大傻憨",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg"],
+    "resources": {
+      "resources/node": "node",
+      "resources/npm": "npm"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
