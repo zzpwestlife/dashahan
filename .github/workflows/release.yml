@@ -23,8 +23,11 @@ jobs:
       - name: 安装依赖
         run: npm install
 
-      - name: 构建 (arm64)
-        run: npm run build -- --target aarch64-apple-darwin
+      - name: 下载内嵌 Node (完整版)
+        run: ./scripts/fetch-node-dist.sh
+
+      - name: 构建完整版 (arm64, 内嵌 Node)
+        run: npm run build -- --config tauri.full.conf.json --target aarch64-apple-darwin
 
       - name: 安装 app 并跑冒烟测试 (发版门禁)
         run: |

@@ -7,28 +7,31 @@ Double-click macOS app wrapping deepseek-harness (`dsh web`). No `npx` commands 
 ## 原理 / How it works
 
 - Tauri 2 原生窗口 (系统 WKWebView).
-- **使用系统 Node.js** 运行 dsh (自动检测 PATH / Homebrew / nvm / mise), app 本体约 5MB, 不再内嵌运行时.
+- **双版本**: 对外完整版**内嵌 Node.js** (开箱即用, 约 126MB); 开发者轻量版用系统 Node.js (自动检测 PATH / Homebrew / nvm / mise, 约 3.7MB).
 - 首次启动自动把 `@deepseek-ai/dsh` 安装到 `~/Library/Application Support/com.solo.dashahan/` (约 2 分钟, 仅一次), 之后跳过安装直接启动.
 - 随机空闲端口启动 `dsh web`, 窗口直接加载本地页面.
-- 单实例: 重复双击只会聚焦已有窗口. 关窗即结束后端进程.
+- **防丢**: API Key 自动存入 macOS 钥匙串 (配置丢失自动恢复); 每次启动自动备份配置到 `~/DASH-backup/` (保留最近 5 份).
+- 单实例: 重复双击只会聚焦已有窗口. **关窗不退出** (隐藏到托盘, dsh 后台保持).
 
 ## 要求 / Requirements
 
-- macOS (Apple Silicon, M 系列), **已安装 Node.js ≥ 18 且带 npm** (任一路径均可: PATH、Homebrew、nvm、mise).
+**完整版 (对外分发)**: 仅需 macOS (Apple Silicon, M 系列), **无需安装 Node.js** — 已内嵌.
+**轻量版 (开发者自用)**: 需本机 Node.js ≥ 18 且带 npm (任一路径: PATH、Homebrew、nvm、mise).
 - ⚠️ **Homebrew 新版 node 公式已不带 npm**: 用 `brew install node` 装的, 需再执行 `brew install npm`. 官网 nodejs.org 下载的安装包自带 npm, 无此问题.
-- 未检测到 Node.js 或缺少 npm 时, app 会提示后重试.
+- 轻量版未检测到 Node.js 或缺少 npm 时, app 会提示后重试.
 
 ## 安装 / Install
 
-分发方式(二选一):
-- **zip 包**: `dist/DASH-macOS.zip`, 解压后拖入 Applications. —— 当前开发环境打不出 DMG, 推荐用此方式.
-- **DMG**: 在一台正常 macOS 上执行 `npm run build`, 产物在 `src-tauri/target/release/bundle/dmg/`.
+分发方式(推荐 zip, CI 也会自动产出 DMG):
+- **zip 包**: `dist/DASH-macOS.zip` (完整版, 开箱即用), 解压后拖入 Applications.
+- **DMG**: 推 `v*` tag 由 GitHub Actions 自动构建, 见 Releases 页.
 
-接收方首次打开 (一次性, 约 5 分钟):
+接收方首次打开 (一次性, 约 3 分钟):
 1. 未签名提示: Finder 中 **右键 DASH.app → 打开** → 再点"打开" (或终端执行 `xattr -cr /Applications/DASH.app` 清除隔离标记).
 2. 首次启动自动下载 dsh (需联网, 约 2 分钟), 之后跳过.
 3. 可能弹出 API Key 对话框 — **可选**: 粘贴 DeepSeek API Key 点"保存", 或直接点"取消"都会继续.
 4. 之后双击秒开. 未设 key 时, 随时可在 dsh 的设置页或菜单「设置 API Key」中添加.
+5. **关窗 = 隐藏** (不是退出): 需要时点菜单栏 🐶 图标唤回; 托盘菜单「退出 DASH」才真正结束.
 
 ## 从源码构建 / Build from source
 
