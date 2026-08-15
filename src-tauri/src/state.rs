@@ -21,6 +21,10 @@ pub struct AppState {
     pub notify_enabled: AtomicBool,
     /// 上次发通知的时间 (10s 防抖; None = 从未发过)
     pub last_notify: Mutex<Option<Instant>>,
+    /// 退出确认对话框去重: ⌘Q / 菜单 / 托盘不同路径都可能触发 request_quit,
+    /// 若已有一张确认弹窗在屏, 后续重复触发直接忽略. 确认(exit)后不重置,
+    /// 取消(reset)后再清, 让用户能再次点退出.
+    pub quit_dialog_pending: AtomicBool,
 }
 
 impl AppState {

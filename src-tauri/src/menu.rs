@@ -262,10 +262,29 @@ fn reset_conversations(app: AppHandle) {
 /// 因为该流程下 prevent_exit 在 macOS 上不可靠 —— 应用会在 Rust 事件循环拦截前就终止)。
 /// 点击/⌘Q 均命中本函数: 弹确认框, 确认后才真正 exit(0)。
 /// (Dock 右键 Quit 仍走系统 terminate, 需 objc2 applicationShouldTerminate 才能拦截, 暂未做。)
+///
+/// 去重: ⌘Q / 菜单项 / 托盘项/ 系统 terminate 兜底 都可能进入 request_quit;
+/// 用 AtomicBool 闸门保证同一时间只有一张确认框, 避免"点一次确定还要再点一次"。
 pub fn request_quit(app: AppHandle) {
+    let st = app.state::<AppState>();
+    if st
+        .quit_dialog_pending
+        .compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst)
+        .is_err()
+    {
+        // 已有确认框在屏 (或正在退出), 忽略本次触发
+        return;
+    }
     std::thread::spawn(move || {
-        if shared::confirm("确认退出 DASH？\n退出后本地 dsh 服务会停止，后台对话将关闭。") {
+        let confirmed = shared::confirm("确认退出 DASH？\n退出后本地 dsh 服务会停止，后台对话将关闭。");
+        if confirmed {
+            // 确认: 不重置 flag, 让任何 straggler 事件也被门挡掉, app.exit 后进程随即结束
             app.exit(0);
+        } else {
+            // 取消: 重置, 让用户后续再次点退出能重新弹框
+            app.state::<AppState>()
+                .quit_dialog_pending
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     });
 }
