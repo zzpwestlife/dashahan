@@ -66,6 +66,13 @@ jobs:
           cp 安装说明-lite.txt dist-lite/安装说明.txt
           cd dist-lite && zip -r -q ../DASH-macOS-lite.zip DASH.app 安装说明.txt && cd ..
 
+      - name: 生成 Release 说明
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          DSH_VERSION=$(grep -oE 'DSH_VERSION.*"[^"]+"' src-tauri/src/main.rs | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{DSH_VERSION}}/${DSH_VERSION}/g" release-body.md > /tmp/release-notes.md
+          grep -q "（TODO: 本版亮点）" /tmp/release-notes.md && echo "::warning::顶部「本次更新」亮点未填写，发版前请在 release-body.md 补上"
+
       - name: 创建 Release (挂 DMG + 双版本 zip)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,4 +83,4 @@ jobs:
           [ -n "$DMG" ] && ASSETS="$ASSETS $DMG"
           gh release create "$VERSION" $ASSETS \
             --title "DASH $VERSION" \
-            --notes "自动构建发布 (GitHub Actions). 完整版(内嵌Node)+轻量版(需系统Node). 内含 dsh 0.1.0-rc.6."
+            --notes-file /tmp/release-notes.md

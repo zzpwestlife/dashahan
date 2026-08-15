@@ -4,6 +4,16 @@
 
 Double-click macOS app wrapping deepseek-harness (`dsh web`). No `npx` commands needed.
 
+## 快速开始 / Quick Start
+
+三步跑起来（完整上手见 [最新 Release](https://github.com/zzpwestlife/dashahan/releases/latest)）：
+
+1. 下载 `DASH-macOS-full.zip`（内嵌 Node，开箱即用）或 `DASH-macOS-lite.zip`（需系统 Node ≥ 18 + npm）
+2. 拖入「应用程序」，首次打开在菜单 **大傻憨 → 设置 API Key** 填入 DeepSeek API Key
+3. 选模型、选模式，开聊
+
+> DASH 是 macOS 双击即用的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web 外壳。
+
 ## 原理
 
 - Tauri 2 原生窗口 (系统 WKWebView).
